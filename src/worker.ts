@@ -337,10 +337,9 @@ function makeToken(username: string, secret: string): string {
 async function callGroq(apiKey: string, messages: any[], max_tokens = 500, temperature = 0.2): Promise<{ text: string; model: string }> {
   const models = [
     "llama-3.1-8b-instant",
-    "llama3-8b-8192",
     "llama-3.3-70b-versatile",
     "llama3-70b-8192",
-    "gemma2-9b-it",
+    "llama3-8b-8192",
   ];
   let lastErr = "";
   for (const m of models) {
@@ -473,15 +472,29 @@ export default {
       const startTime = Date.now();
       try {
         if (provider === "gemini") {
-          await callGemini(keyToTest, [{ parts: [{ text: "ping" }] }]);
+          const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${keyToTest}`);
+          if (!res.ok) {
+            const errText = await res.text();
+            throw new Error(`HTTP ${res.status}: ${errText.slice(0, 150)}`);
+          }
         } else if (provider === "groq") {
-          await callGroq(keyToTest, [{ role: "user", content: "ping" }], 2);
-        } else if (provider === "openai") {
-          const res = await fetch("https://api.openai.com/v1/chat/completions", {
-            method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${keyToTest}` },
-            body: JSON.stringify({ model: "gpt-4o-mini", messages: [{ role: "user", content: "ping" }], max_tokens: 2 })
+          const res = await fetch("https://api.groq.com/openai/v1/models", {
+            method: "GET",
+            headers: { Authorization: `Bearer ${keyToTest}` },
           });
-          if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text()).slice(0, 100)}`);
+          if (!res.ok) {
+            const errText = await res.text();
+            throw new Error(`HTTP ${res.status}: ${errText.slice(0, 150)}`);
+          }
+        } else if (provider === "openai") {
+          const res = await fetch("https://api.openai.com/v1/models", {
+            method: "GET",
+            headers: { Authorization: `Bearer ${keyToTest}` },
+          });
+          if (!res.ok) {
+            const errText = await res.text();
+            throw new Error(`HTTP ${res.status}: ${errText.slice(0, 150)}`);
+          }
         } else {
           throw new Error("Unknown provider: " + provider);
         }
