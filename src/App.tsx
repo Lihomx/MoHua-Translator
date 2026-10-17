@@ -5,11 +5,13 @@ import { LiveTranscript } from './components/LiveTranscript';
 import { BottomControls } from './components/BottomControls';
 import { TextInputModal } from './components/TextInputModal';
 import { ModelSelectorModal } from './components/ModelSelectorModal';
+import { AdminSettingsModal } from './components/AdminSettingsModal';
 import type { TranslationMessage, ModelOption } from './types';
 import { speechRecognitionService } from './services/speechRecognition';
 import { speechSynthesisService } from './services/speechSynthesis';
 import { wakeLockService } from './services/wakeLock';
 import { fetchAvailableModels, translateText } from './services/translationApi';
+import { apiKeyService } from './services/apiKeyService';
 
 export function App() {
   const [hasStarted, setHasStarted] = useState<boolean>(false);
@@ -34,6 +36,7 @@ export function App() {
 
   // Modals state
   const [isModelModalOpen, setIsModelModalOpen] = useState<boolean>(false);
+  const [isAdminModalOpen, setIsAdminModalOpen] = useState<boolean>(false);
   const [isTextInputModalOpen, setIsTextInputModalOpen] = useState<boolean>(false);
   const [isHoldingToTalk, setIsHoldingToTalk] = useState<boolean>(false);
 
@@ -45,8 +48,9 @@ export function App() {
     fetchAvailableModels().then((data) => {
       if (data && data.length > 0) {
         setModels(data);
-        const defaultModel = data.find((m) => m.id === 'gemini-2.5-flash') || data[0];
-        setCurrentModel(defaultModel);
+        const savedModelId = apiKeyService.getActiveModelId();
+        const initialModel = data.find((m) => m.id === savedModelId) || data.find((m) => m.id === 'gemini-2.5-flash') || data[0];
+        setCurrentModel(initialModel);
       }
     });
   }, []);
@@ -273,6 +277,7 @@ export function App() {
         isMuted={isMuted}
         onToggleMute={handleToggleMute}
         onOpenModelModal={() => setIsModelModalOpen(true)}
+        onOpenAdminModal={() => setIsAdminModalOpen(true)}
         isWakeLockActive={isWakeLockActive}
         isListening={isListening}
       />
@@ -308,7 +313,22 @@ export function App() {
         onClose={() => setIsModelModalOpen(false)}
         models={models}
         currentModel={currentModel}
-        onSelectModel={(model) => setCurrentModel(model)}
+        onSelectModel={(model) => {
+          setCurrentModel(model);
+          apiKeyService.setActiveModelId(model.id);
+        }}
+      />
+
+      {/* Modal: Admin / API Key Management & Testing */}
+      <AdminSettingsModal
+        isOpen={isAdminModalOpen}
+        onClose={() => setIsAdminModalOpen(false)}
+        models={models}
+        currentModel={currentModel}
+        onSelectModel={(model) => {
+          setCurrentModel(model);
+          apiKeyService.setActiveModelId(model.id);
+        }}
       />
     </div>
   );

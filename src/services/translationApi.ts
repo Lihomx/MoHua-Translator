@@ -1,13 +1,20 @@
 // Translation API Client
-// Calls Cloudflare Pages Function `/api/translate` and `/api/models`
+// Calls Cloudflare Pages Function `/api/translate` and `/api/models` and `/api/test-key`
 
 import type { ModelOption } from '../types';
+import { apiKeyService } from './apiKeyService';
 
 export interface TranslateResult {
   translation: string;
   provider?: string;
   modelUsed?: string;
   durationMs: number;
+}
+
+export interface TestKeyResult {
+  ok: boolean;
+  latencyMs?: number;
+  error?: string;
 }
 
 export async function fetchAvailableModels(): Promise<ModelOption[]> {
@@ -59,6 +66,23 @@ export async function fetchAvailableModels(): Promise<ModelOption[]> {
   }
 }
 
+export async function testApiKey(
+  provider: 'gemini' | 'groq' | 'openai',
+  apiKey: string
+): Promise<TestKeyResult> {
+  try {
+    const res = await fetch('/api/test-key', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider, apiKey }),
+    });
+    const data = await res.json();
+    return data;
+  } catch (err: any) {
+    return { ok: false, error: err.message || '网络连接失败' };
+  }
+}
+
 export async function translateText(
   text: string,
   sourceLang: 'es-MX' | 'zh-CN',
@@ -67,6 +91,7 @@ export async function translateText(
   modelTier: 'free' | 'pro'
 ): Promise<TranslateResult> {
   const startTime = Date.now();
+  const customKeys = apiKeyService.getKeys();
 
   try {
     const res = await fetch('/api/translate', {
@@ -80,6 +105,7 @@ export async function translateText(
         targetLang,
         modelId,
         modelTier,
+        customKeys,
       }),
     });
 
@@ -88,7 +114,7 @@ export async function translateText(
     if (!res.ok) {
       const errorJson = await res.json().catch(() => null);
       if (errorJson?.needConfig) {
-        throw new Error(errorJson.error || '后端尚未配置 API Key，请在云端添加环境变量');
+        throw new Error(errorJson.error || '未配置 API Key，请点击右上角齿轮⚙️填写 Key');
       }
       throw new Error(errorJson?.error || `翻译失败 HTTP ${res.status}`);
     }

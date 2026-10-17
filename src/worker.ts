@@ -1,5 +1,6 @@
 // Cloudflare Worker entry point
 // Compatible with Cloudflare Workers Builds + Static Assets (assets: "./dist")
+// Supports both Cloudflare backend Environment Variables and Frontend Admin custom API keys
 
 export interface Env {
   GEMINI_API_KEY?: string;
@@ -48,7 +49,7 @@ export default {
         headers: {
           "Access-Control-Allow-Origin": "*",
           "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-          "Access-Control-Allow-Headers": "Content-Type, Authorization",
+          "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Gemini-Key, X-Groq-Key, X-OpenAI-Key",
         },
       });
     }
@@ -60,6 +61,10 @@ export default {
 
     if (url.pathname === "/api/translate" && request.method === "POST") {
       return handleTranslate(request, env);
+    }
+
+    if (url.pathname === "/api/test-key" && request.method === "POST") {
+      return handleTestKey(request, env);
     }
 
     // 3. Static Assets fallback (Frontend SPA: HTML, CSS, JS)
@@ -84,7 +89,7 @@ function handleModels(env: Env): Response {
       tier: "free",
       provider: "google",
       latency: "~200ms",
-      available: hasGemini || (!hasGemini && !hasOpenAI && !hasGroq),
+      available: true,
       description: "响应极快，语义自然，免费额度充裕",
     },
     {
@@ -93,7 +98,7 @@ function handleModels(env: Env): Response {
       tier: "free",
       provider: "groq",
       latency: "~150ms",
-      available: hasGroq,
+      available: true,
       description: "超强推演速度，端到端延迟低至150ms",
     },
     {
@@ -102,7 +107,7 @@ function handleModels(env: Env): Response {
       tier: "pro",
       provider: "openai",
       latency: "~350ms",
-      available: hasOpenAI,
+      available: true,
       description: "顶级拉美与墨西哥俚语理解，语义极其地道",
     },
     {
@@ -111,7 +116,7 @@ function handleModels(env: Env): Response {
       tier: "pro",
       provider: "google",
       latency: "~450ms",
-      available: hasGemini,
+      available: true,
       description: "高复杂度长句、商务、学术同传精翻",
     },
   ];
@@ -132,6 +137,86 @@ function handleModels(env: Env): Response {
   );
 }
 
+// Handler: /api/test-key
+async function handleTestKey(request: Request, env: Env): Promise<Response> {
+  let body: any;
+  try {
+    body = await request.json();
+  } catch {
+    return new Response(JSON.stringify({ ok: false, error: "Invalid JSON" }), { status: 400 });
+  }
+
+  const { provider, apiKey } = body;
+  const keyToTest = apiKey || (provider === 'gemini' ? env.GEMINI_API_KEY : provider === 'groq' ? env.GROQ_API_KEY : env.OPENAI_API_KEY);
+
+  if (!keyToTest) {
+    return new Response(
+      JSON.stringify({ ok: false, error: "未检测到 API Key，请先输入密钥" }),
+      { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } }
+    );
+  }
+
+  const startTime = Date.now();
+  try {
+    if (provider === "gemini") {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${keyToTest}`;
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: "ping" }] }],
+          generationConfig: { maxOutputTokens: 2 },
+        }),
+      });
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`Google API ${res.status}: ${errText.slice(0, 150)}`);
+      }
+    } else if (provider === "groq") {
+      const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${keyToTest}` },
+        body: JSON.stringify({
+          model: "llama-3.3-70b-versatile",
+          messages: [{ role: "user", content: "ping" }],
+          max_tokens: 2,
+        }),
+      });
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`Groq API ${res.status}: ${errText.slice(0, 150)}`);
+      }
+    } else if (provider === "openai") {
+      const res = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${keyToTest}` },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          messages: [{ role: "user", content: "ping" }],
+          max_tokens: 2,
+        }),
+      });
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`OpenAI API ${res.status}: ${errText.slice(0, 150)}`);
+      }
+    } else {
+      throw new Error("未知 Provider: " + provider);
+    }
+
+    const latencyMs = Date.now() - startTime;
+    return new Response(
+      JSON.stringify({ ok: true, latencyMs }),
+      { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } }
+    );
+  } catch (err: any) {
+    return new Response(
+      JSON.stringify({ ok: false, error: err.message || "测试连接失败" }),
+      { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } }
+    );
+  }
+}
+
 // Handler: /api/translate
 async function handleTranslate(request: Request, env: Env): Promise<Response> {
   let body: any;
@@ -144,7 +229,13 @@ async function handleTranslate(request: Request, env: Env): Promise<Response> {
     });
   }
 
-  const { text, sourceLang = "es-MX", targetLang = "zh-CN", modelId = "gemini-2.5-flash" } = body;
+  const {
+    text,
+    sourceLang = "es-MX",
+    targetLang = "zh-CN",
+    modelId = "gemini-2.5-flash",
+    customKeys = {},
+  } = body;
 
   if (!text || typeof text !== "string" || text.trim() === "") {
     return new Response(JSON.stringify({ translation: "" }), {
@@ -156,9 +247,10 @@ async function handleTranslate(request: Request, env: Env): Promise<Response> {
   const isEsToZh = sourceLang.toLowerCase().includes("es") || targetLang.toLowerCase().includes("zh");
   const systemPrompt = isEsToZh ? MEXICAN_SPANISH_TO_CHINESE_PROMPT : CHINESE_TO_MEXICAN_SPANISH_PROMPT;
 
-  const geminiKey = env.GEMINI_API_KEY;
-  const groqKey = env.GROQ_API_KEY;
-  const openAiKey = env.OPENAI_API_KEY;
+  // Custom Keys from Frontend Admin Panel take precedence; fallback to Cloudflare env
+  const geminiKey = customKeys.gemini || env.GEMINI_API_KEY;
+  const groqKey = customKeys.groq || env.GROQ_API_KEY;
+  const openAiKey = customKeys.openai || env.OPENAI_API_KEY;
 
   let chosenProvider = "gemini";
   if (modelId.startsWith("groq") && groqKey) {
@@ -231,7 +323,7 @@ async function handleTranslate(request: Request, env: Env): Promise<Response> {
     } else {
       return new Response(
         JSON.stringify({
-          error: "后端尚未配置 API Key。请在 Cloudflare 环境变量中添加 GEMINI_API_KEY。",
+          error: "未配置 API Key。请在页面右上角管理设置中填写 API Key，或在 Cloudflare 环境变量中添加 GEMINI_API_KEY。",
           needConfig: true,
         }),
         {

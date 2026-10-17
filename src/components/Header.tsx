@@ -1,5 +1,5 @@
 import React from 'react';
-import { Volume2, VolumeX, Sparkles, Smartphone } from 'lucide-react';
+import { Volume2, VolumeX, Sparkles, Smartphone, Settings } from 'lucide-react';
 import type { ModelOption } from '../types';
 
 interface HeaderProps {
@@ -7,6 +7,7 @@ interface HeaderProps {
   isMuted: boolean;
   onToggleMute: () => void;
   onOpenModelModal: () => void;
+  onOpenAdminModal: () => void;
   isWakeLockActive: boolean;
   isListening: boolean;
 }
@@ -16,6 +17,7 @@ export const Header: React.FC<HeaderProps> = ({
   isMuted,
   onToggleMute,
   onOpenModelModal,
+  onOpenAdminModal,
   isWakeLockActive,
   isListening,
 }) => {
@@ -49,7 +51,7 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
 
-        {/* Right Controls: Model Picker + Audio Output Mute */}
+        {/* Right Controls: Model Picker + Voice Mute + Admin Settings */}
         <div className="flex items-center gap-2">
           {/* Model Switcher Pill */}
           <button
@@ -75,6 +77,15 @@ export const Header: React.FC<HeaderProps> = ({
             title={isMuted ? '点击开启中文语音朗读' : '已开启语音朗读，点击静音'}
           >
             {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+          </button>
+
+          {/* Admin / API Settings Gear Button */}
+          <button
+            onClick={onOpenAdminModal}
+            className="p-2 rounded-full border bg-gray-900 border-gray-700 text-gray-400 hover:text-emerald-400 hover:border-emerald-500/40 active:scale-95 transition-all"
+            title="管理设置 / 填写测试 API Key"
+          >
+            <Settings className="w-4 h-4" />
           </button>
         </div>
       </div>
