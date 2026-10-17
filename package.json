@@ -1,6 +1,6 @@
 {
   "name": "mohua-translator",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "极速网页端同声传译器（支持苹果/安卓手机端，墨西哥西语转中文）",
   "type": "module",
   "scripts": {
