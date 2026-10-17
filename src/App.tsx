@@ -268,7 +268,11 @@ export function App() {
     <div className="flex flex-col h-[100svh] w-full max-w-md mx-auto bg-[#0b0f19] text-gray-100 overflow-hidden relative shadow-2xl">
       {/* First-visit Hero Activation Overlay */}
       {!hasStarted && (
-        <StartOverlay onStart={handleStartSession} error={startError} />
+        <StartOverlay
+          onStart={handleStartSession}
+          onOpenAdmin={() => setIsAdminModalOpen(true)}
+          error={startError}
+        />
       )}
 
       {/* Main App Layout */}

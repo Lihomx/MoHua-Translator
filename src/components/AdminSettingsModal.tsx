@@ -65,7 +65,7 @@ export const AdminSettingsModal: React.FC<AdminSettingsModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex flex-col justify-end sm:justify-center p-0 sm:p-4">
+    <div className="fixed inset-0 z-[70] bg-black/85 backdrop-blur-md flex flex-col justify-end sm:justify-center p-0 sm:p-4">
       <div className="bg-[#111827] border-t sm:border border-gray-800 rounded-t-3xl sm:rounded-2xl p-5 pb-safe max-h-[90vh] overflow-y-auto max-w-lg w-full mx-auto shadow-2xl">
         {/* Header */}
         <div className="flex items-center justify-between mb-4 border-b border-gray-800/80 pb-3">

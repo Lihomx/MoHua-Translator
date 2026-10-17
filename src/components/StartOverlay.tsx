@@ -1,20 +1,34 @@
 import React from 'react';
-import { Mic, Zap, ShieldCheck, Smartphone } from 'lucide-react';
+import { Mic, Zap, ShieldCheck, Smartphone, Settings } from 'lucide-react';
 
 interface StartOverlayProps {
   onStart: () => void;
+  onOpenAdmin: () => void;
   error?: string | null;
 }
 
-export const StartOverlay: React.FC<StartOverlayProps> = ({ onStart, error }) => {
+export const StartOverlay: React.FC<StartOverlayProps> = ({ onStart, onOpenAdmin, error }) => {
   return (
     <div className="fixed inset-0 z-50 bg-[#0b0f19] flex flex-col items-center justify-between p-6 pt-safe pb-safe select-none">
-      {/* Top Brand Banner */}
-      <div className="w-full text-center mt-6">
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-medium mb-3">
+      {/* Top Bar with Admin Settings Trigger */}
+      <div className="w-full flex items-center justify-between">
+        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-medium">
           <Zap className="w-3.5 h-3.5" />
           网页端 0 缓冲极速同传
         </div>
+
+        {/* Prominent Admin Settings Gear Button */}
+        <button
+          onClick={onOpenAdmin}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-gray-900 border border-gray-700 hover:border-emerald-500/50 text-gray-300 hover:text-emerald-400 text-xs font-medium shadow-md active:scale-95 transition-all"
+        >
+          <Settings className="w-4 h-4 text-emerald-400" />
+          <span>设置 API Key</span>
+        </button>
+      </div>
+
+      {/* Brand Title */}
+      <div className="w-full text-center mt-2">
         <h1 className="text-3xl font-extrabold text-white tracking-tight mb-2">
           MoHua 墨华同传
         </h1>
