@@ -142,7 +142,7 @@ function buildAdminHTML(env: Env): string {
       <div class="section-title">⚡ Groq API Key</div>
       <div class="field">
         <div class="label-row">
-          <label>GROQ_API_KEY</label>
+          <label>GROQ_API_KEY (默认: llama-3.1-8b-instant，延迟 ~100ms)</label>
           <span class="status ${hasGroq ? 'ok' : 'missing'}">${hasGroq ? '✓ 已配置' : '○ 未配置'}</span>
         </div>
         <input id="groq" type="password" placeholder="gsk_..." ${hasGroq ? 'value="[已在环境变量配置]"' : ''}>
@@ -333,6 +333,85 @@ function makeToken(username: string, secret: string): string {
   return btoa(`${username}:${secret}:mohua-admin`);
 }
 
+// Resilient Groq caller with automatic model fallback
+async function callGroq(apiKey: string, messages: any[], max_tokens = 500, temperature = 0.2): Promise<{ text: string; model: string }> {
+  const models = [
+    "llama-3.1-8b-instant",
+    "llama3-8b-8192",
+    "llama-3.3-70b-versatile",
+    "llama3-70b-8192",
+    "gemma2-9b-it",
+  ];
+  let lastErr = "";
+  for (const m of models) {
+    try {
+      const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({ model: m, messages, temperature, max_tokens }),
+      });
+      if (res.ok) {
+        const d: any = await res.json();
+        return { text: d.choices?.[0]?.message?.content || "", model: m };
+      }
+      const errText = await res.text();
+      lastErr = `HTTP ${res.status}: ${errText.slice(0, 150)}`;
+      if (res.status === 401 || res.status === 403) {
+        throw new Error("Groq API Key 无效或未授权: " + lastErr);
+      }
+    } catch (e: any) {
+      if (e.message.includes("API Key 无效")) throw e;
+      lastErr = e.message;
+    }
+  }
+  throw new Error(lastErr || "Groq 所有可用模型均无法连接");
+}
+
+// Resilient Gemini caller with automatic model fallback
+async function callGemini(apiKey: string, contents: any[], systemPrompt?: string, preferredModel = "gemini-2.5-flash"): Promise<{ text: string; model: string }> {
+  const models = [
+    preferredModel,
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
+    "gemini-2.5-flash",
+  ];
+  const uniqueModels = [...new Set(models)];
+  let lastErr = "";
+  for (const m of uniqueModels) {
+    try {
+      const payload: any = {
+        contents,
+        generationConfig: { temperature: 0.3, maxOutputTokens: 500 },
+      };
+      if (systemPrompt) {
+        payload.system_instruction = { parts: [{ text: systemPrompt }] };
+      }
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${apiKey}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }
+      );
+      if (res.ok) {
+        const d: any = await res.json();
+        const text = d.candidates?.[0]?.content?.parts?.[0]?.text || "";
+        return { text, model: m };
+      }
+      const errText = await res.text();
+      lastErr = `HTTP ${res.status}: ${errText.slice(0, 150)}`;
+      if (res.status === 400 && errText.includes("API_KEY_INVALID")) {
+        throw new Error("Gemini API Key 无效: " + lastErr);
+      }
+    } catch (e: any) {
+      if (e.message.includes("API Key 无效")) throw e;
+      lastErr = e.message;
+    }
+  }
+  throw new Error(lastErr || "Gemini 所有模型均无法连接");
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -381,7 +460,6 @@ export default {
       const body: any = await request.json().catch(() => ({}));
       const { provider, apiKey } = body;
 
-      // Use custom key if provided, otherwise fall back to env
       const keyToTest =
         (apiKey && apiKey !== "[已在环境变量配置]") ? apiKey :
         provider === "gemini" ? env.GEMINI_API_KEY :
@@ -395,18 +473,9 @@ export default {
       const startTime = Date.now();
       try {
         if (provider === "gemini") {
-          const res = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${keyToTest}`,
-            { method: "POST", headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ contents: [{ parts: [{ text: "ping" }] }], generationConfig: { maxOutputTokens: 2 } }) }
-          );
-          if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text()).slice(0, 100)}`);
+          await callGemini(keyToTest, [{ parts: [{ text: "ping" }] }]);
         } else if (provider === "groq") {
-          const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-            method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${keyToTest}` },
-            body: JSON.stringify({ model: "llama-3.3-70b-versatile", messages: [{ role: "user", content: "ping" }], max_tokens: 2 })
-          });
-          if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text()).slice(0, 100)}`);
+          await callGroq(keyToTest, [{ role: "user", content: "ping" }], 2);
         } else if (provider === "openai") {
           const res = await fetch("https://api.openai.com/v1/chat/completions", {
             method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${keyToTest}` },
@@ -432,7 +501,7 @@ export default {
         configuredKeys: { gemini: hasGemini, openai: hasOpenAI, groq: hasGroq },
         models: [
           { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash (推荐)", tier: "free", provider: "google", latency: "~200ms", available: true, description: "响应极快，语义自然，免费额度充裕" },
-          { id: "groq-llama-3", name: "Groq Llama-3.3 70B", tier: "free", provider: "groq", latency: "~150ms", available: true, description: "超强推演速度，端到端延迟低至150ms" },
+          { id: "groq-llama-3", name: "Groq Llama-3.1 8B (超快)", tier: "free", provider: "groq", latency: "~100ms", available: true, description: "超强推演速度，端到端延迟低至100ms" },
           { id: "gpt-4o-mini", name: "OpenAI GPT-4o-mini", tier: "pro", provider: "openai", latency: "~350ms", available: true, description: "顶级拉美与墨西哥俚语理解，语义极其地道" },
           { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", tier: "pro", provider: "google", latency: "~450ms", available: true, description: "高复杂度长句、商务、学术同传精翻" },
         ],
@@ -462,13 +531,15 @@ export default {
 
       try {
         let translation = "";
+        let usedModel = modelId;
+
         if (provider === "groq" && groqKey) {
-          const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-            method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${groqKey}` },
-            body: JSON.stringify({ model: "llama-3.3-70b-versatile", messages: [{ role: "system", content: systemPrompt }, { role: "user", content: text }], temperature: 0.2, max_tokens: 500 })
-          });
-          const d: any = await res.json();
-          translation = d.choices?.[0]?.message?.content || "";
+          const res = await callGroq(groqKey, [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: text }
+          ]);
+          translation = res.text;
+          usedModel = res.model;
         } else if (provider === "openai" && openAiKey) {
           const res = await fetch("https://api.openai.com/v1/chat/completions", {
             method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${openAiKey}` },
@@ -477,18 +548,18 @@ export default {
           const d: any = await res.json();
           translation = d.choices?.[0]?.message?.content || "";
         } else if (geminiKey) {
-          const modelName = modelId.includes("pro") ? "gemini-2.5-pro" : "gemini-2.5-flash";
-          const res = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${geminiKey}`,
-            { method: "POST", headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ system_instruction: { parts: [{ text: systemPrompt }] }, contents: [{ role: "user", parts: [{ text }] }], generationConfig: { temperature: 0.3, maxOutputTokens: 500 } }) }
+          const res = await callGemini(
+            geminiKey,
+            [{ role: "user", parts: [{ text }] }],
+            systemPrompt,
+            modelId.includes("pro") ? "gemini-2.5-pro" : "gemini-2.5-flash"
           );
-          const d: any = await res.json();
-          translation = d.candidates?.[0]?.content?.parts?.[0]?.text || "";
+          translation = res.text;
+          usedModel = res.model;
         } else {
           return json({ error: "未配置 API Key。请访问 /admin 管理后台填写 API Key", needConfig: true }, 503);
         }
-        return json({ code: 0, translation: translation.trim(), provider, modelUsed: modelId });
+        return json({ code: 0, translation: translation.trim(), provider, modelUsed: usedModel });
       } catch (err: any) {
         return json({ error: err.message }, 500);
       }
