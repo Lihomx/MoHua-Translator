@@ -338,8 +338,6 @@ async function callGroq(apiKey: string, messages: any[], max_tokens = 500, tempe
   const models = [
     "llama-3.1-8b-instant",
     "llama-3.3-70b-versatile",
-    "llama3-70b-8192",
-    "llama3-8b-8192",
   ];
   let lastErr = "";
   for (const m of models) {

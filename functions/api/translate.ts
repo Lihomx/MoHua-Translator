@@ -183,7 +183,7 @@ async function translateWithGemini(apiKey: string, text: string, systemPrompt: s
 
 // 2. Groq Provider (Ultra-low latency Llama-3)
 async function translateWithGroq(apiKey: string, text: string, systemPrompt: string, modelId: string): Promise<string> {
-  const model = modelId.includes("70b") || modelId === "groq-llama-3" ? "llama-3.3-70b-versatile" : "llama3-8b-8192";
+  const model = modelId.includes("70b") ? "llama-3.3-70b-versatile" : "llama-3.1-8b-instant";
   const url = "https://api.groq.com/openai/v1/chat/completions";
 
   const response = await fetch(url, {
