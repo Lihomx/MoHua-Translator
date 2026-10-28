@@ -79,6 +79,13 @@ class SpeechRecognitionService {
         this.callbacks?.onListeningChange(false);
         return;
       }
+      if (event.error === 'service-not-allowed' || event.error === 'network' || event.error === 'audio-capture') {
+        this.shouldKeepListening = false;
+        this.callbacks?.onError('PDA/设备未安装 Google 语音识别引擎。请点击底部【打字】模式直接输入，或在PDA安装 Google 语音服务 (Speech Services)。');
+        this.isListening = false;
+        this.callbacks?.onListeningChange(false);
+        return;
+      }
       console.warn('SpeechRecognition error:', event.error);
     };
 
@@ -137,9 +144,9 @@ class SpeechRecognitionService {
     try {
       this.recognition.start();
     } catch (err: any) {
-      // If already started or aborting, ignore
       if (err.name !== 'InvalidStateError') {
         console.warn('Recognition start exception:', err);
+        this.callbacks?.onError('PDA未检测到语音识别引擎，可点击底部【打字】模式直接输入');
       }
     }
   }

@@ -5,7 +5,6 @@ import { LiveTranscript } from './components/LiveTranscript';
 import { BottomControls } from './components/BottomControls';
 import { TextInputModal } from './components/TextInputModal';
 import { ModelSelectorModal } from './components/ModelSelectorModal';
-import { AdminSettingsModal } from './components/AdminSettingsModal';
 import type { TranslationMessage, ModelOption } from './types';
 import { speechRecognitionService } from './services/speechRecognition';
 import { speechSynthesisService } from './services/speechSynthesis';
@@ -36,7 +35,6 @@ export function App() {
 
   // Modals state
   const [isModelModalOpen, setIsModelModalOpen] = useState<boolean>(false);
-  const [isAdminModalOpen, setIsAdminModalOpen] = useState<boolean>(false);
   const [isTextInputModalOpen, setIsTextInputModalOpen] = useState<boolean>(false);
   const [isHoldingToTalk, setIsHoldingToTalk] = useState<boolean>(false);
 
@@ -81,7 +79,7 @@ export function App() {
 
     // Check browser speech recognition support
     if (!speechRecognitionService.getIsSupported()) {
-      setStartError('当前浏览器不支持语音识别。推荐使用最新版 Chrome、Safari 或 Edge 浏览器');
+      setStartError('PDA或当前设备未检测到语音识别。推荐点击下方直接进入【打字同传模式】，或安装 Google 语音服务。');
       return;
     }
 
@@ -95,8 +93,15 @@ export function App() {
       setHasStarted(true);
     } catch (err: any) {
       console.error('Session start error:', err);
-      setStartError('无法访问麦克风，请确认已授予麦克风权限');
+      setStartError('PDA无法启动麦克风语音，您可以直接点击下方进入【打字同传】');
     }
+  };
+
+  // Alternative startup for PDA or typing-only users
+  const handleStartTypingSession = () => {
+    setStartError(null);
+    setHasStarted(true);
+    setIsTextInputModalOpen(true);
   };
 
   // 4. Translate Mexican Spanish utterance to Chinese
@@ -270,7 +275,7 @@ export function App() {
       {!hasStarted && (
         <StartOverlay
           onStart={handleStartSession}
-          onOpenAdmin={() => setIsAdminModalOpen(true)}
+          onStartTypingMode={handleStartTypingSession}
           error={startError}
         />
       )}
@@ -281,7 +286,6 @@ export function App() {
         isMuted={isMuted}
         onToggleMute={handleToggleMute}
         onOpenModelModal={() => setIsModelModalOpen(true)}
-        onOpenAdminModal={() => setIsAdminModalOpen(true)}
         isWakeLockActive={isWakeLockActive}
         isListening={isListening}
       />
@@ -311,22 +315,10 @@ export function App() {
         onSubmit={handleTextInputSubmit}
       />
 
-      {/* Modal: Model Selector (Free vs Pro) */}
+      {/* Modal: Model Selector (Users switch models here freely with 0 API keys) */}
       <ModelSelectorModal
         isOpen={isModelModalOpen}
         onClose={() => setIsModelModalOpen(false)}
-        models={models}
-        currentModel={currentModel}
-        onSelectModel={(model) => {
-          setCurrentModel(model);
-          apiKeyService.setActiveModelId(model.id);
-        }}
-      />
-
-      {/* Modal: Admin / API Key Management & Testing */}
-      <AdminSettingsModal
-        isOpen={isAdminModalOpen}
-        onClose={() => setIsAdminModalOpen(false)}
         models={models}
         currentModel={currentModel}
         onSelectModel={(model) => {

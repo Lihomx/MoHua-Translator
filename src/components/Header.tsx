@@ -1,5 +1,5 @@
 import React from 'react';
-import { Volume2, VolumeX, Sparkles, Smartphone, Settings } from 'lucide-react';
+import { Volume2, VolumeX, Sparkles, Smartphone, ShieldCheck } from 'lucide-react';
 import type { ModelOption } from '../types';
 
 interface HeaderProps {
@@ -7,7 +7,6 @@ interface HeaderProps {
   isMuted: boolean;
   onToggleMute: () => void;
   onOpenModelModal: () => void;
-  onOpenAdminModal: () => void;
   isWakeLockActive: boolean;
   isListening: boolean;
 }
@@ -17,7 +16,6 @@ export const Header: React.FC<HeaderProps> = ({
   isMuted,
   onToggleMute,
   onOpenModelModal,
-  onOpenAdminModal,
   isWakeLockActive,
   isListening,
 }) => {
@@ -51,19 +49,21 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
 
-        {/* Right Controls: Model Picker + Voice Mute + Admin Settings */}
+        {/* Right Controls: Model Switcher + Voice Output Toggle + Admin Portal Link */}
         <div className="flex items-center gap-2">
-          {/* Model Switcher Pill */}
+          {/* Prominent Model Switcher Button for ordinary users */}
           <button
             onClick={onOpenModelModal}
-            className={`flex items-center gap-1 px-2.5 py-1.5 rounded-full text-xs font-medium border transition-all ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border shadow-sm transition-all active:scale-95 ${
               currentModel.tier === 'pro'
-                ? 'bg-gradient-to-r from-amber-500/10 to-orange-500/10 border-amber-500/30 text-amber-300'
-                : 'bg-blue-500/10 border-blue-500/30 text-blue-300'
+                ? 'bg-gradient-to-r from-amber-500/15 to-orange-500/15 border-amber-500/40 text-amber-300'
+                : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/20'
             }`}
+            title="点击切换同传模型"
           >
-            <Sparkles className="w-3 h-3" />
-            <span className="max-w-[70px] truncate">{currentModel.tier === 'pro' ? '高级' : '免费'}</span>
+            <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+            <span className="max-w-[90px] truncate">{currentModel.name.split(' ')[0]}</span>
+            <span className="text-[10px] opacity-70">▾</span>
           </button>
 
           {/* Voice Output Toggle */}
@@ -79,14 +79,16 @@ export const Header: React.FC<HeaderProps> = ({
             {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
           </button>
 
-          {/* Admin / API Settings Gear Button */}
-          <button
-            onClick={onOpenAdminModal}
-            className="p-2 rounded-full border bg-gray-900 border-gray-700 text-gray-400 hover:text-emerald-400 hover:border-emerald-500/40 active:scale-95 transition-all"
-            title="管理设置 / 填写测试 API Key"
+          {/* Discreet Admin Portal Link */}
+          <a
+            href="/admin"
+            target="_blank"
+            rel="noreferrer"
+            className="p-2 rounded-full border bg-gray-900 border-gray-800 text-gray-500 hover:text-emerald-400 hover:border-emerald-500/30 active:scale-95 transition-all"
+            title="管理后台（配置/修改 API Key）"
           >
-            <Settings className="w-4 h-4" />
-          </button>
+            <ShieldCheck className="w-4 h-4" />
+          </a>
         </div>
       </div>
     </header>

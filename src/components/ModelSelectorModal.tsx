@@ -130,7 +130,7 @@ export const ModelSelectorModal: React.FC<ModelSelectorModalProps> = ({
         <div className="p-3 rounded-xl bg-gray-900 border border-gray-800 text-[11px] text-gray-400 flex items-center gap-2">
           <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
           <span>
-            API Key 已在 Cloudflare 云端环境变量安全加密托管，手机端随时自由切换，无需输入密码。
+            所有 API Key 均由管理端在 /admin 后台统一安全托管，在此可随心自由切换不同模型，无需输入任何密钥。
           </span>
         </div>
       </div>
