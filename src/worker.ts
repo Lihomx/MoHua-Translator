@@ -1,12 +1,16 @@
 // Cloudflare Worker — MoHua 墨华同传
 // Handles: Admin login, API key storage (env vars), Translation API, Static Assets
+// Supported Engines: Cloudflare Workers AI, SiliconFlow, Zhipu, SambaNova, OpenRouter, Gemini, Groq, OpenAI
 
 export interface Env {
-  // These are set in Cloudflare dashboard Settings > Variables & Secrets
   GEMINI_API_KEY?: string;
   OPENAI_API_KEY?: string;
   GROQ_API_KEY?: string;
-  // Admin panel login credentials (set in Cloudflare dashboard)
+  SILICONFLOW_API_KEY?: string;
+  ZHIPU_API_KEY?: string;
+  SAMBANOVA_API_KEY?: string;
+  OPENROUTER_API_KEY?: string;
+  AI?: any; // Cloudflare Workers AI binding
   ADMIN_USERNAME?: string;  // default: admin
   ADMIN_PASSWORD?: string;  // default: mohua2024
   ASSETS?: { fetch: (request: Request) => Promise<Response> };
@@ -32,7 +36,7 @@ Translate into natural, fluent Mexican Spanish. Output ONLY the translated Spani
 const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Admin-Token",
 };
 
 function json(data: unknown, status = 200) {
@@ -47,6 +51,11 @@ function buildAdminHTML(env: Env): string {
   const hasGemini = Boolean(env.GEMINI_API_KEY);
   const hasGroq = Boolean(env.GROQ_API_KEY);
   const hasOpenAI = Boolean(env.OPENAI_API_KEY);
+  const hasSilicon = Boolean(env.SILICONFLOW_API_KEY);
+  const hasZhipu = Boolean(env.ZHIPU_API_KEY);
+  const hasSambaNova = Boolean(env.SAMBANOVA_API_KEY);
+  const hasOpenRouter = Boolean(env.OPENROUTER_API_KEY);
+  const hasCfAi = Boolean(env.AI);
 
   return `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -57,27 +66,27 @@ function buildAdminHTML(env: Env): string {
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro',sans-serif;background:#0b0f19;color:#f3f4f6;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
-  .card{background:#111827;border:1px solid #1f2937;border-radius:20px;padding:28px;width:100%;max-width:480px;box-shadow:0 25px 50px rgba(0,0,0,0.5)}
+  .card{background:#111827;border:1px solid #1f2937;border-radius:20px;padding:28px;width:100%;max-width:540px;box-shadow:0 25px 50px rgba(0,0,0,0.5)}
   .logo{display:flex;align-items:center;gap:10px;margin-bottom:24px}
   .logo-icon{width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#10b981,#06b6d4);display:flex;align-items:center;justify-content:center;font-weight:900;color:#fff;font-size:16px}
   h1{font-size:18px;font-weight:700;color:#fff}
   h1 span{font-size:13px;font-weight:400;color:#6b7280;display:block;margin-top:2px}
-  .section{margin-bottom:20px}
-  .section-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#10b981;margin-bottom:10px;display:flex;align-items:center;gap:6px}
-  .field{margin-bottom:12px}
-  label{display:block;font-size:12px;color:#9ca3af;margin-bottom:5px}
-  input{width:100%;background:#0b0f19;border:1px solid #374151;border-radius:10px;padding:10px 12px;color:#f3f4f6;font-size:13px;font-family:monospace;outline:none;transition:.2s}
+  .section{margin-bottom:16px;background:#0d1322;border:1px solid #1f293d;border-radius:14px;padding:14px}
+  .section-title{font-size:12px;font-weight:700;letter-spacing:.04em;color:#10b981;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between}
+  .field{margin-bottom:6px}
+  label{display:block;font-size:11px;color:#9ca3af;margin-bottom:4px}
+  input{width:100%;background:#0b0f19;border:1px solid #374151;border-radius:8px;padding:8px 10px;color:#f3f4f6;font-size:12px;font-family:monospace;outline:none;transition:.2s}
   input:focus{border-color:#10b981;box-shadow:0 0 0 3px rgba(16,185,129,.15)}
-  .status{display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:2px 8px;border-radius:20px;font-weight:600}
+  .status{display:inline-flex;align-items:center;gap:4px;font-size:10px;padding:2px 7px;border-radius:20px;font-weight:600}
   .status.ok{background:rgba(16,185,129,.1);color:#10b981;border:1px solid rgba(16,185,129,.3)}
   .status.missing{background:rgba(239,68,68,.1);color:#f87171;border:1px solid rgba(239,68,68,.2)}
-  .label-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:5px}
+  .status.native{background:rgba(59,130,246,.1);color:#60a5fa;border:1px solid rgba(59,130,246,.3)}
+  .label-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
   .btn{width:100%;padding:12px;border-radius:12px;border:none;background:linear-gradient(135deg,#10b981,#06b6d4);color:#fff;font-weight:700;font-size:14px;cursor:pointer;transition:.15s;margin-top:4px}
   .btn:hover{opacity:.9;transform:translateY(-1px)}
   .btn:active{transform:scale(.98)}
   .btn.secondary{background:#1f2937;border:1px solid #374151;color:#d1d5db;margin-top:8px}
   .btn.secondary:hover{background:#374151}
-  .btn.danger{background:linear-gradient(135deg,#ef4444,#dc2626);margin-top:8px}
   .msg{padding:10px 14px;border-radius:10px;font-size:13px;margin-bottom:16px;display:none}
   .msg.ok{background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.3);color:#10b981}
   .msg.err{background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);color:#f87171}
@@ -86,7 +95,7 @@ function buildAdminHTML(env: Env): string {
   .admin-wrap{display:none}
   .info-box{background:#0b0f19;border:1px solid #1f2937;border-radius:12px;padding:12px 14px;font-size:12px;color:#6b7280;line-height:1.6;margin-top:16px}
   .info-box strong{color:#9ca3af}
-  .test-btn{float:right;background:#1f2937;border:1px solid #374151;color:#9ca3af;border-radius:8px;padding:4px 10px;font-size:11px;cursor:pointer}
+  .test-btn{float:right;background:#1f2937;border:1px solid #374151;color:#9ca3af;border-radius:6px;padding:3px 8px;font-size:10px;cursor:pointer}
   .test-btn:hover{color:#10b981;border-color:#10b981}
 </style>
 </head>
@@ -101,7 +110,7 @@ function buildAdminHTML(env: Env): string {
 
   <!-- Login Form -->
   <div class="login-wrap" id="login-wrap" style="display:block">
-    <div class="section">
+    <div class="section" style="background:transparent;border:none;padding:0">
       <div class="section-title">🔐 管理员登录</div>
       <div class="field">
         <label>账号</label>
@@ -122,43 +131,125 @@ function buildAdminHTML(env: Env): string {
 
   <!-- Admin Panel -->
   <div class="admin-wrap" id="admin-wrap">
-    <div id="page-subtitle-2" style="font-size:11px;color:#6b7280;margin-bottom:20px">
-      已登录 · API Key 保存在 Cloudflare 环境变量中（安全加密）
+    <div id="page-subtitle-2" style="font-size:11px;color:#6b7280;margin-bottom:16px">
+      已登录 · 支持 8 大模型引擎 · 永久免费与自备 Key 随心调配
     </div>
 
+    <!-- 0. Cloudflare Workers AI -->
     <div class="section">
-      <div class="section-title">🌟 Google Gemini API Key</div>
+      <div class="section-title">
+        <span>🤖 Cloudflare Workers AI</span>
+        <button class="test-btn" onclick="testKey('cf-ai')">测试连通</button>
+      </div>
+      <div class="label-row">
+        <label>系统原生 Llama-3.1 8B（每日 10,000 次免费推理）</label>
+        <span class="status native">${hasCfAi ? '✓ 内置已启用' : '✓ 原生就绪'}</span>
+      </div>
+      <p style="font-size:11px;color:#6b7280;margin-top:2px">免 Key 零配置 · 边缘节点超低延迟 ~180ms，开箱即用保底</p>
+    </div>
+
+    <!-- 1. SiliconFlow -->
+    <div class="section">
+      <div class="section-title">
+        <span>🇨🇳 硅基流动 SiliconFlow（Qwen 2.5 永久免费）</span>
+        <button class="test-btn" onclick="testKey('siliconflow')">测试连通</button>
+      </div>
       <div class="field">
         <div class="label-row">
-          <label>GEMINI_API_KEY</label>
-          <span class="status ${hasGemini ? 'ok' : 'missing'}">${hasGemini ? '✓ 已配置' : '○ 未配置'}</span>
+          <label>SILICONFLOW_API_KEY (推荐模型: Qwen/Qwen2.5-7B-Instruct)</label>
+          <span class="status ${hasSilicon ? 'ok' : 'missing'}">${hasSilicon ? '✓ 已配置' : '○ 未配置'}</span>
         </div>
-        <input id="gemini" type="password" placeholder="AIzaSy..." ${hasGemini ? 'value="[已在环境变量配置]"' : ''}>
-        <button class="test-btn" onclick="testKey('gemini')">测试连通</button>
+        <input id="siliconflow" type="password" placeholder="sk-..." ${hasSilicon ? 'value="[已在环境变量配置]"' : ''}>
       </div>
     </div>
 
+    <!-- 2. Groq -->
     <div class="section">
-      <div class="section-title">⚡ Groq API Key</div>
+      <div class="section-title">
+        <span>⚡ Groq API Key（超极速 ~100ms）</span>
+        <button class="test-btn" onclick="testKey('groq')">测试连通</button>
+      </div>
       <div class="field">
         <div class="label-row">
-          <label>GROQ_API_KEY (默认: llama-3.1-8b-instant，延迟 ~100ms)</label>
+          <label>GROQ_API_KEY (默认: llama-3.1-8b-instant)</label>
           <span class="status ${hasGroq ? 'ok' : 'missing'}">${hasGroq ? '✓ 已配置' : '○ 未配置'}</span>
         </div>
         <input id="groq" type="password" placeholder="gsk_..." ${hasGroq ? 'value="[已在环境变量配置]"' : ''}>
-        <button class="test-btn" onclick="testKey('groq')">测试连通</button>
       </div>
     </div>
 
+    <!-- 3. SambaNova -->
     <div class="section">
-      <div class="section-title">💎 OpenAI API Key</div>
+      <div class="section-title">
+        <span>🚀 SambaNova Cloud（超算级极速免费）</span>
+        <button class="test-btn" onclick="testKey('sambanova')">测试连通</button>
+      </div>
       <div class="field">
         <div class="label-row">
-          <label>OPENAI_API_KEY</label>
+          <label>SAMBANOVA_API_KEY (Meta-Llama-3.1-8B-Instruct)</label>
+          <span class="status ${hasSambaNova ? 'ok' : 'missing'}">${hasSambaNova ? '✓ 已配置' : '○ 未配置'}</span>
+        </div>
+        <input id="sambanova" type="password" placeholder="••••••••" ${hasSambaNova ? 'value="[已在环境变量配置]"' : ''}>
+      </div>
+    </div>
+
+    <!-- 4. Zhipu AI -->
+    <div class="section">
+      <div class="section-title">
+        <span>🌟 智谱 AI（GLM-4-Flash 永久免费）</span>
+        <button class="test-btn" onclick="testKey('zhipu')">测试连通</button>
+      </div>
+      <div class="field">
+        <div class="label-row">
+          <label>ZHIPU_API_KEY (模型: glm-4-flash)</label>
+          <span class="status ${hasZhipu ? 'ok' : 'missing'}">${hasZhipu ? '✓ 已配置' : '○ 未配置'}</span>
+        </div>
+        <input id="zhipu" type="password" placeholder="••••••••" ${hasZhipu ? 'value="[已在环境变量配置]"' : ''}>
+      </div>
+    </div>
+
+    <!-- 5. OpenRouter -->
+    <div class="section">
+      <div class="section-title">
+        <span>🌐 OpenRouter（全球免费模型聚合）</span>
+        <button class="test-btn" onclick="testKey('openrouter')">测试连通</button>
+      </div>
+      <div class="field">
+        <div class="label-row">
+          <label>OPENROUTER_API_KEY (llama-3.1-8b:free)</label>
+          <span class="status ${hasOpenRouter ? 'ok' : 'missing'}">${hasOpenRouter ? '✓ 已配置' : '○ 未配置'}</span>
+        </div>
+        <input id="openrouter" type="password" placeholder="sk-or-..." ${hasOpenRouter ? 'value="[已在环境变量配置]"' : ''}>
+      </div>
+    </div>
+
+    <!-- 6. Google Gemini -->
+    <div class="section">
+      <div class="section-title">
+        <span>🌟 Google Gemini API Key</span>
+        <button class="test-btn" onclick="testKey('gemini')">测试连通</button>
+      </div>
+      <div class="field">
+        <div class="label-row">
+          <label>GEMINI_API_KEY (gemini-2.5-flash / gemini-2.5-pro)</label>
+          <span class="status ${hasGemini ? 'ok' : 'missing'}">${hasGemini ? '✓ 已配置' : '○ 未配置'}</span>
+        </div>
+        <input id="gemini" type="password" placeholder="AIzaSy..." ${hasGemini ? 'value="[已在环境变量配置]"' : ''}>
+      </div>
+    </div>
+
+    <!-- 7. OpenAI -->
+    <div class="section">
+      <div class="section-title">
+        <span>💎 OpenAI API Key</span>
+        <button class="test-btn" onclick="testKey('openai')">测试连通</button>
+      </div>
+      <div class="field">
+        <div class="label-row">
+          <label>OPENAI_API_KEY (gpt-4o-mini)</label>
           <span class="status ${hasOpenAI ? 'ok' : 'missing'}">${hasOpenAI ? '✓ 已配置' : '○ 未配置'}</span>
         </div>
         <input id="openai" type="password" placeholder="sk-..." ${hasOpenAI ? 'value="[已在环境变量配置]"' : ''}>
-        <button class="test-btn" onclick="testKey('openai')">测试连通</button>
       </div>
     </div>
 
@@ -166,24 +257,14 @@ function buildAdminHTML(env: Env): string {
 
     <hr class="divider">
 
-    <div class="section">
+    <div class="section" style="background:transparent;border:none;padding:0">
       <div class="section-title">💾 保存 API Key（本地浏览器）</div>
       <p style="font-size:12px;color:#6b7280;margin-bottom:12px;line-height:1.6">
-        填写下方 API Key 后点击保存，将安全存储在浏览器 localStorage 中，翻译请求会自动带上此 Key。
-        正式上线时请在 Cloudflare 后台设置环境变量实现服务端托管。
+        填写下方 API Key 后点击保存，将安全存储在浏览器 localStorage 中。
+        在 Cloudflare 后台设置环境变量可实现全站免填服务端托管。
       </p>
       <button class="btn" onclick="saveKeys()">💾 保存 Key 到本地浏览器</button>
       <button class="btn secondary" onclick="clearKeys()">🗑 清空本地保存的 Key</button>
-    </div>
-
-    <hr class="divider">
-
-    <div class="info-box">
-      <strong>如何在 Cloudflare 后台永久配置 API Key（推荐）：</strong><br>
-      1. 进入 Cloudflare 控制台 → Workers & Pages → mohua-translator<br>
-      2. 点击 Settings → Variables and Secrets → Add variable<br>
-      3. 添加 GEMINI_API_KEY / GROQ_API_KEY / OPENAI_API_KEY<br>
-      4. 配置好后无需前端输入，所有用户共享后端密钥
     </div>
 
     <button class="btn secondary" onclick="logout()" style="margin-top:16px">退出登录</button>
@@ -209,7 +290,7 @@ function showTestResult(text, ok) {
   el.style.background = ok ? 'rgba(16,185,129,.1)' : 'rgba(239,68,68,.1)';
   el.style.border = ok ? '1px solid rgba(16,185,129,.3)' : '1px solid rgba(239,68,68,.3)';
   el.style.color = ok ? '#10b981' : '#f87171';
-  setTimeout(() => { el.style.display = 'none'; }, 5000);
+  setTimeout(() => { el.style.display = 'none'; }, 6000);
 }
 
 async function doLogin() {
@@ -244,37 +325,53 @@ function loadSavedKeys() {
     if (data.gemini) document.getElementById('gemini').value = data.gemini;
     if (data.groq) document.getElementById('groq').value = data.groq;
     if (data.openai) document.getElementById('openai').value = data.openai;
+    if (data.siliconflow) document.getElementById('siliconflow').value = data.siliconflow;
+    if (data.sambanova) document.getElementById('sambanova').value = data.sambanova;
+    if (data.zhipu) document.getElementById('zhipu').value = data.zhipu;
+    if (data.openrouter) document.getElementById('openrouter').value = data.openrouter;
   } catch(e) {}
 }
 
 function saveKeys() {
-  const gemini = document.getElementById('gemini').value.trim();
-  const groq = document.getElementById('groq').value.trim();
-  const openai = document.getElementById('openai').value.trim();
+  const gemini = document.getElementById('gemini')?.value.trim();
+  const groq = document.getElementById('groq')?.value.trim();
+  const openai = document.getElementById('openai')?.value.trim();
+  const siliconflow = document.getElementById('siliconflow')?.value.trim();
+  const sambanova = document.getElementById('sambanova')?.value.trim();
+  const zhipu = document.getElementById('zhipu')?.value.trim();
+  const openrouter = document.getElementById('openrouter')?.value.trim();
 
   const keys = {};
   if (gemini && gemini !== '[已在环境变量配置]') keys.gemini = gemini;
   if (groq && groq !== '[已在环境变量配置]') keys.groq = groq;
   if (openai && openai !== '[已在环境变量配置]') keys.openai = openai;
+  if (siliconflow && siliconflow !== '[已在环境变量配置]') keys.siliconflow = siliconflow;
+  if (sambanova && sambanova !== '[已在环境变量配置]') keys.sambanova = sambanova;
+  if (zhipu && zhipu !== '[已在环境变量配置]') keys.zhipu = zhipu;
+  if (openrouter && openrouter !== '[已在环境变量配置]') keys.openrouter = openrouter;
 
   localStorage.setItem(KEYS_KEY, JSON.stringify(keys));
-  showMsg('✅ API Key 已保存！同传页面刷新后即刻生效', 'ok');
+  showMsg('✅ 所有配置的 API Key 已保存！同传页面刷新后即刻生效', 'ok');
 }
 
 function clearKeys() {
-  if (confirm('确认清空本地保存的 API Key？')) {
+  if (confirm('确认清空本地保存的所有 API Key？')) {
     localStorage.removeItem(KEYS_KEY);
-    document.getElementById('gemini').value = '';
-    document.getElementById('groq').value = '';
-    document.getElementById('openai').value = '';
+    ['gemini','groq','openai','siliconflow','sambanova','zhipu','openrouter'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.value = '';
+    });
     showMsg('已清空本地 API Key', 'ok');
   }
 }
 
 async function testKey(provider) {
-  const rawVal = document.getElementById(provider).value.trim();
-  const savedKeys = JSON.parse(localStorage.getItem(KEYS_KEY) || '{}');
-  const apiKey = (rawVal && rawVal !== '[已在环境变量配置]') ? rawVal : savedKeys[provider] || '';
+  let apiKey = '';
+  if (provider !== 'cf-ai') {
+    const rawVal = document.getElementById(provider)?.value.trim() || '';
+    const savedKeys = JSON.parse(localStorage.getItem(KEYS_KEY) || '{}');
+    apiKey = (rawVal && rawVal !== '[已在环境变量配置]') ? rawVal : savedKeys[provider] || '';
+  }
 
   showTestResult('🔄 正在测试连通性...', true);
   try {
@@ -303,7 +400,6 @@ function logout() {
   showMsg('已退出登录', 'ok');
 }
 
-// Auto-login if token exists
 window.addEventListener('DOMContentLoaded', () => {
   const token = localStorage.getItem(TOKEN_KEY);
   if (token) {
@@ -333,12 +429,9 @@ function makeToken(username: string, secret: string): string {
   return btoa(`${username}:${secret}:mohua-admin`);
 }
 
-// Resilient Groq caller with automatic model fallback
+// Resilient Groq caller
 async function callGroq(apiKey: string, messages: any[], max_tokens = 500, temperature = 0.2): Promise<{ text: string; model: string }> {
-  const models = [
-    "llama-3.1-8b-instant",
-    "llama-3.3-70b-versatile",
-  ];
+  const models = ["llama-3.1-8b-instant", "llama-3.3-70b-versatile"];
   let lastErr = "";
   for (const m of models) {
     try {
@@ -353,9 +446,7 @@ async function callGroq(apiKey: string, messages: any[], max_tokens = 500, tempe
       }
       const errText = await res.text();
       lastErr = `HTTP ${res.status}: ${errText.slice(0, 150)}`;
-      if (res.status === 401 || res.status === 403) {
-        throw new Error("Groq API Key 无效或未授权: " + lastErr);
-      }
+      if (res.status === 401 || res.status === 403) throw new Error("Groq API Key 无效: " + lastErr);
     } catch (e: any) {
       if (e.message.includes("API Key 无效")) throw e;
       lastErr = e.message;
@@ -364,32 +455,18 @@ async function callGroq(apiKey: string, messages: any[], max_tokens = 500, tempe
   throw new Error(lastErr || "Groq 所有可用模型均无法连接");
 }
 
-// Resilient Gemini caller with automatic model fallback
+// Resilient Gemini caller
 async function callGemini(apiKey: string, contents: any[], systemPrompt?: string, preferredModel = "gemini-2.5-flash"): Promise<{ text: string; model: string }> {
-  const models = [
-    preferredModel,
-    "gemini-2.0-flash",
-    "gemini-1.5-flash",
-    "gemini-2.5-flash",
-  ];
+  const models = [preferredModel, "gemini-2.0-flash", "gemini-1.5-flash", "gemini-2.5-flash"];
   const uniqueModels = [...new Set(models)];
   let lastErr = "";
   for (const m of uniqueModels) {
     try {
-      const payload: any = {
-        contents,
-        generationConfig: { temperature: 0.3, maxOutputTokens: 500 },
-      };
-      if (systemPrompt) {
-        payload.system_instruction = { parts: [{ text: systemPrompt }] };
-      }
+      const payload: any = { contents, generationConfig: { temperature: 0.3, maxOutputTokens: 500 } };
+      if (systemPrompt) payload.system_instruction = { parts: [{ text: systemPrompt }] };
       const res = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${apiKey}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        }
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }
       );
       if (res.ok) {
         const d: any = await res.json();
@@ -398,15 +475,146 @@ async function callGemini(apiKey: string, contents: any[], systemPrompt?: string
       }
       const errText = await res.text();
       lastErr = `HTTP ${res.status}: ${errText.slice(0, 150)}`;
-      if (res.status === 400 && errText.includes("API_KEY_INVALID")) {
-        throw new Error("Gemini API Key 无效: " + lastErr);
-      }
+      if (res.status === 400 && errText.includes("API_KEY_INVALID")) throw new Error("Gemini API Key 无效: " + lastErr);
     } catch (e: any) {
       if (e.message.includes("API Key 无效")) throw e;
       lastErr = e.message;
     }
   }
   throw new Error(lastErr || "Gemini 所有模型均无法连接");
+}
+
+// Cloudflare Workers AI caller
+async function callCloudflareAI(ai: any, messages: any[]): Promise<{ text: string; model: string }> {
+  const model = "@cf/meta/llama-3.1-8b-instruct";
+  const res: any = await ai.run(model, { messages, max_tokens: 500, temperature: 0.2 });
+  const text = typeof res === "string" ? res : (res?.response || res?.text || "");
+  return { text, model };
+}
+
+// SiliconFlow caller (Qwen 2.5)
+async function callSiliconFlow(apiKey: string, messages: any[], model = "Qwen/Qwen2.5-7B-Instruct"): Promise<{ text: string; model: string }> {
+  const res = await fetch("https://api.siliconflow.cn/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({ model, messages, temperature: 0.2, max_tokens: 500 }),
+  });
+  if (!res.ok) throw new Error(`SiliconFlow HTTP ${res.status}: ${(await res.text()).slice(0, 150)}`);
+  const d: any = await res.json();
+  return { text: d.choices?.[0]?.message?.content || "", model };
+}
+
+// Zhipu GLM-4-Flash caller
+async function callZhipu(apiKey: string, messages: any[], model = "glm-4-flash"): Promise<{ text: string; model: string }> {
+  const res = await fetch("https://open.bigmodel.cn/api/paas/v4/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({ model, messages, temperature: 0.2, max_tokens: 500 }),
+  });
+  if (!res.ok) throw new Error(`Zhipu HTTP ${res.status}: ${(await res.text()).slice(0, 150)}`);
+  const d: any = await res.json();
+  return { text: d.choices?.[0]?.message?.content || "", model };
+}
+
+// SambaNova caller
+async function callSambaNova(apiKey: string, messages: any[], model = "Meta-Llama-3.1-8B-Instruct"): Promise<{ text: string; model: string }> {
+  const res = await fetch("https://api.sambanova.ai/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({ model, messages, temperature: 0.2, max_tokens: 500 }),
+  });
+  if (!res.ok) throw new Error(`SambaNova HTTP ${res.status}: ${(await res.text()).slice(0, 150)}`);
+  const d: any = await res.json();
+  return { text: d.choices?.[0]?.message?.content || "", model };
+}
+
+// OpenRouter caller
+async function callOpenRouter(apiKey: string, messages: any[], model = "meta-llama/llama-3.1-8b-instruct:free"): Promise<{ text: string; model: string }> {
+  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+      "HTTP-Referer": "https://mohua-translator.pages.dev",
+      "X-Title": "MoHua Translator",
+    },
+    body: JSON.stringify({ model, messages, temperature: 0.2, max_tokens: 500 }),
+  });
+  if (!res.ok) throw new Error(`OpenRouter HTTP ${res.status}: ${(await res.text()).slice(0, 150)}`);
+  const d: any = await res.json();
+  return { text: d.choices?.[0]?.message?.content || "", model };
+}
+
+// Core test key runner (Shared between admin and in-app modal)
+async function runKeyTest(provider: string, apiKey: string | undefined, env: Env): Promise<{ ok: boolean; latencyMs?: number; error?: string }> {
+  const keyToTest = (apiKey && apiKey !== "[已在环境变量配置]") ? apiKey :
+    provider === "gemini" ? env.GEMINI_API_KEY :
+    provider === "groq" ? env.GROQ_API_KEY :
+    provider === "openai" ? env.OPENAI_API_KEY :
+    provider === "siliconflow" ? env.SILICONFLOW_API_KEY :
+    provider === "zhipu" ? env.ZHIPU_API_KEY :
+    provider === "sambanova" ? env.SAMBANOVA_API_KEY :
+    provider === "openrouter" ? env.OPENROUTER_API_KEY : undefined;
+
+  if (provider !== "cf-ai" && !keyToTest) {
+    return { ok: false, error: "未检测到 API Key，请先输入 Key 或在 Cloudflare 环境变量中配置" };
+  }
+
+  const startTime = Date.now();
+  try {
+    if (provider === "cf-ai") {
+      if (!env.AI) throw new Error("Cloudflare Workers AI 绑定未启用");
+      await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
+        messages: [{ role: "user", content: "ping" }],
+        max_tokens: 1,
+      });
+    } else if (provider === "gemini") {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${keyToTest}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text()).slice(0, 150)}`);
+    } else if (provider === "groq") {
+      const res = await fetch("https://api.groq.com/openai/v1/models", {
+        method: "GET", headers: { Authorization: `Bearer ${keyToTest}` },
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text()).slice(0, 150)}`);
+    } else if (provider === "openai") {
+      const res = await fetch("https://api.openai.com/v1/models", {
+        method: "GET", headers: { Authorization: `Bearer ${keyToTest}` },
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text()).slice(0, 150)}`);
+    } else if (provider === "siliconflow") {
+      const res = await fetch("https://api.siliconflow.cn/v1/models", {
+        method: "GET", headers: { Authorization: `Bearer ${keyToTest}` },
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text()).slice(0, 150)}`);
+    } else if (provider === "zhipu") {
+      const res = await fetch("https://open.bigmodel.cn/api/paas/v4/models", {
+        method: "GET", headers: { Authorization: `Bearer ${keyToTest}` },
+      });
+      if (!res.ok) {
+        const testRes = await fetch("https://open.bigmodel.cn/api/paas/v4/chat/completions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${keyToTest}` },
+          body: JSON.stringify({ model: "glm-4-flash", messages: [{ role: "user", content: "hi" }], max_tokens: 1 }),
+        });
+        if (!testRes.ok) throw new Error(`HTTP ${testRes.status}: ${(await testRes.text()).slice(0, 150)}`);
+      }
+    } else if (provider === "sambanova") {
+      const res = await fetch("https://api.sambanova.ai/v1/models", {
+        method: "GET", headers: { Authorization: `Bearer ${keyToTest}` },
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text()).slice(0, 150)}`);
+    } else if (provider === "openrouter") {
+      const res = await fetch("https://openrouter.ai/api/v1/models", {
+        method: "GET", headers: { Authorization: `Bearer ${keyToTest}` },
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text()).slice(0, 150)}`);
+    } else {
+      throw new Error("Unknown provider: " + provider);
+    }
+    return { ok: true, latencyMs: Date.now() - startTime };
+  } catch (err: any) {
+    return { ok: false, error: err.message };
+  }
 }
 
 export default {
@@ -445,6 +653,7 @@ export default {
       return json({ ok: token === expectedToken });
     }
 
+    // Admin test key endpoint (Protected)
     if (path === "/admin/api/test-key" && request.method === "POST") {
       const token = request.headers.get("X-Admin-Token") || "";
       const expectedUser = env.ADMIN_USERNAME || "admin";
@@ -455,64 +664,39 @@ export default {
       }
 
       const body: any = await request.json().catch(() => ({}));
-      const { provider, apiKey } = body;
+      const result = await runKeyTest(body.provider, body.apiKey, env);
+      return json(result);
+    }
 
-      const keyToTest =
-        (apiKey && apiKey !== "[已在环境变量配置]") ? apiKey :
-        provider === "gemini" ? env.GEMINI_API_KEY :
-        provider === "groq" ? env.GROQ_API_KEY :
-        provider === "openai" ? env.OPENAI_API_KEY : undefined;
-
-      if (!keyToTest) {
-        return json({ ok: false, error: "没有找到可用的 API Key，请先输入 Key 或在 Cloudflare 环境变量中配置" });
-      }
-
-      const startTime = Date.now();
-      try {
-        if (provider === "gemini") {
-          const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${keyToTest}`);
-          if (!res.ok) {
-            const errText = await res.text();
-            throw new Error(`HTTP ${res.status}: ${errText.slice(0, 150)}`);
-          }
-        } else if (provider === "groq") {
-          const res = await fetch("https://api.groq.com/openai/v1/models", {
-            method: "GET",
-            headers: { Authorization: `Bearer ${keyToTest}` },
-          });
-          if (!res.ok) {
-            const errText = await res.text();
-            throw new Error(`HTTP ${res.status}: ${errText.slice(0, 150)}`);
-          }
-        } else if (provider === "openai") {
-          const res = await fetch("https://api.openai.com/v1/models", {
-            method: "GET",
-            headers: { Authorization: `Bearer ${keyToTest}` },
-          });
-          if (!res.ok) {
-            const errText = await res.text();
-            throw new Error(`HTTP ${res.status}: ${errText.slice(0, 150)}`);
-          }
-        } else {
-          throw new Error("Unknown provider: " + provider);
-        }
-        return json({ ok: true, latencyMs: Date.now() - startTime });
-      } catch (err: any) {
-        return json({ ok: false, error: err.message });
-      }
+    // Public in-app test key endpoint
+    if (path === "/api/test-key" && request.method === "POST") {
+      const body: any = await request.json().catch(() => ({}));
+      const result = await runKeyTest(body.provider, body.apiKey, env);
+      return json(result);
     }
 
     // ===== TRANSLATION API ROUTES =====
     if (path === "/api/models" && request.method === "GET") {
-      const hasGemini = Boolean(env.GEMINI_API_KEY);
-      const hasOpenAI = Boolean(env.OPENAI_API_KEY);
-      const hasGroq = Boolean(env.GROQ_API_KEY);
       return json({
         code: 0,
-        configuredKeys: { gemini: hasGemini, openai: hasOpenAI, groq: hasGroq },
+        configuredKeys: {
+          cloudflare: Boolean(env.AI),
+          siliconflow: Boolean(env.SILICONFLOW_API_KEY),
+          groq: Boolean(env.GROQ_API_KEY),
+          gemini: Boolean(env.GEMINI_API_KEY),
+          sambanova: Boolean(env.SAMBANOVA_API_KEY),
+          zhipu: Boolean(env.ZHIPU_API_KEY),
+          openrouter: Boolean(env.OPENROUTER_API_KEY),
+          openai: Boolean(env.OPENAI_API_KEY),
+        },
         models: [
+          { id: "cf-llama-3.1", name: "Cloudflare AI (免Key·免费)", tier: "free", provider: "cloudflare", latency: "~180ms", available: true, description: "系统原生免Key运行，打开即用，每日1万次免费" },
+          { id: "silicon-qwen-2.5", name: "硅基 Qwen 2.5 7B (永久免费)", tier: "free", provider: "siliconflow", latency: "~200ms", available: true, description: "阿里通义千问，西中口语俚语互译水平极高" },
+          { id: "groq-llama-3", name: "Groq Llama-3.1 8B (超快)", tier: "free", provider: "groq", latency: "~100ms", available: true, description: "超强LPU推演速度，端到端延迟低至100ms" },
           { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash (推荐)", tier: "free", provider: "google", latency: "~200ms", available: true, description: "响应极快，语义自然，免费额度充裕" },
-          { id: "groq-llama-3", name: "Groq Llama-3.1 8B (超快)", tier: "free", provider: "groq", latency: "~100ms", available: true, description: "超强推演速度，端到端延迟低至100ms" },
+          { id: "sambanova-llama", name: "SambaNova Llama-3.1 (极速)", tier: "free", provider: "sambanova", latency: "~100ms", available: true, description: "超算芯片级推理速度，专为同声传译设计" },
+          { id: "zhipu-glm-4", name: "智谱 GLM-4-Flash (免费)", tier: "free", provider: "zhipu", latency: "~250ms", available: true, description: "智谱官方0元免费调用，中文表达地道流畅" },
+          { id: "openrouter-free", name: "OpenRouter Free (聚合)", tier: "free", provider: "openrouter", latency: "~300ms", available: true, description: "多路免费大模型聚合路由，高可用兜底" },
           { id: "gpt-4o-mini", name: "OpenAI GPT-4o-mini", tier: "pro", provider: "openai", latency: "~350ms", available: true, description: "顶级拉美与墨西哥俚语理解，语义极其地道" },
           { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", tier: "pro", provider: "google", latency: "~450ms", available: true, description: "高复杂度长句、商务、学术同传精翻" },
         ],
@@ -523,7 +707,7 @@ export default {
       let body: any;
       try { body = await request.json(); } catch { return json({ error: "Invalid JSON" }, 400); }
 
-      const { text, sourceLang = "es-MX", targetLang = "zh-CN", modelId = "gemini-2.5-flash", customKeys = {} } = body;
+      const { text, sourceLang = "es-MX", targetLang = "zh-CN", modelId = "cf-llama-3.1", customKeys = {} } = body;
       if (!text?.trim()) return json({ translation: "" });
 
       const isEsToZh = sourceLang.includes("es") || targetLang.includes("zh");
@@ -532,29 +716,68 @@ export default {
       const geminiKey = (customKeys.gemini && customKeys.gemini !== "[已在环境变量配置]") ? customKeys.gemini : env.GEMINI_API_KEY;
       const groqKey = (customKeys.groq && customKeys.groq !== "[已在环境变量配置]") ? customKeys.groq : env.GROQ_API_KEY;
       const openAiKey = (customKeys.openai && customKeys.openai !== "[已在环境变量配置]") ? customKeys.openai : env.OPENAI_API_KEY;
+      const siliconKey = (customKeys.siliconflow && customKeys.siliconflow !== "[已在环境变量配置]") ? customKeys.siliconflow : env.SILICONFLOW_API_KEY;
+      const zhipuKey = (customKeys.zhipu && customKeys.zhipu !== "[已在环境变量配置]") ? customKeys.zhipu : env.ZHIPU_API_KEY;
+      const sambaKey = (customKeys.sambanova && customKeys.sambanova !== "[已在环境变量配置]") ? customKeys.sambanova : env.SAMBANOVA_API_KEY;
+      const openrouterKey = (customKeys.openrouter && customKeys.openrouter !== "[已在环境变量配置]") ? customKeys.openrouter : env.OPENROUTER_API_KEY;
 
-      let provider = "gemini";
-      if (modelId.startsWith("groq") && groqKey) provider = "groq";
+      const messages = [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: text },
+      ];
+
+      // Route priority
+      let provider = "";
+      if (modelId.startsWith("cf") && env.AI) provider = "cloudflare";
+      else if (modelId.startsWith("silicon") && siliconKey) provider = "siliconflow";
+      else if (modelId.startsWith("zhipu") && zhipuKey) provider = "zhipu";
+      else if (modelId.startsWith("sambanova") && sambaKey) provider = "sambanova";
+      else if (modelId.startsWith("openrouter") && openrouterKey) provider = "openrouter";
+      else if (modelId.startsWith("groq") && groqKey) provider = "groq";
       else if (modelId.startsWith("gpt") && openAiKey) provider = "openai";
-      else if (geminiKey) provider = "gemini";
+      else if (modelId.includes("gemini") && geminiKey) provider = "gemini";
+      // Fallback order if selected model has no key
+      else if (env.AI) provider = "cloudflare";
+      else if (siliconKey) provider = "siliconflow";
       else if (groqKey) provider = "groq";
+      else if (geminiKey) provider = "gemini";
+      else if (sambaKey) provider = "sambanova";
+      else if (zhipuKey) provider = "zhipu";
+      else if (openrouterKey) provider = "openrouter";
       else if (openAiKey) provider = "openai";
 
       try {
         let translation = "";
         let usedModel = modelId;
 
-        if (provider === "groq" && groqKey) {
-          const res = await callGroq(groqKey, [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: text }
-          ]);
+        if (provider === "cloudflare" && env.AI) {
+          const res = await callCloudflareAI(env.AI, messages);
+          translation = res.text;
+          usedModel = res.model;
+        } else if (provider === "siliconflow" && siliconKey) {
+          const res = await callSiliconFlow(siliconKey, messages);
+          translation = res.text;
+          usedModel = res.model;
+        } else if (provider === "groq" && groqKey) {
+          const res = await callGroq(groqKey, messages);
+          translation = res.text;
+          usedModel = res.model;
+        } else if (provider === "sambanova" && sambaKey) {
+          const res = await callSambaNova(sambaKey, messages);
+          translation = res.text;
+          usedModel = res.model;
+        } else if (provider === "zhipu" && zhipuKey) {
+          const res = await callZhipu(zhipuKey, messages);
+          translation = res.text;
+          usedModel = res.model;
+        } else if (provider === "openrouter" && openrouterKey) {
+          const res = await callOpenRouter(openrouterKey, messages);
           translation = res.text;
           usedModel = res.model;
         } else if (provider === "openai" && openAiKey) {
           const res = await fetch("https://api.openai.com/v1/chat/completions", {
             method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${openAiKey}` },
-            body: JSON.stringify({ model: "gpt-4o-mini", messages: [{ role: "system", content: systemPrompt }, { role: "user", content: text }], temperature: 0.2, max_tokens: 500 })
+            body: JSON.stringify({ model: "gpt-4o-mini", messages, temperature: 0.2, max_tokens: 500 })
           });
           const d: any = await res.json();
           translation = d.choices?.[0]?.message?.content || "";
@@ -568,8 +791,9 @@ export default {
           translation = res.text;
           usedModel = res.model;
         } else {
-          return json({ error: "未配置 API Key。请访问 /admin 管理后台填写 API Key", needConfig: true }, 503);
+          return json({ error: "未检测到可用的 API Key。请访问 /admin 后台配置 Key 或开启 Cloudflare Workers AI", needConfig: true }, 503);
         }
+
         return json({ code: 0, translation: translation.trim(), provider, modelUsed: usedModel });
       } catch (err: any) {
         return json({ error: err.message }, 500);

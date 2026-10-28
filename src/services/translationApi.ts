@@ -27,6 +27,33 @@ export async function fetchAvailableModels(): Promise<ModelOption[]> {
     console.warn('Using default models configuration:', err);
     return [
       {
+        id: 'cf-llama-3.1',
+        name: 'Cloudflare AI (免Key·免费)',
+        tier: 'free',
+        provider: 'cloudflare',
+        latency: '~180ms',
+        available: true,
+        description: '系统内置免费运行，无需填写Key即可使用',
+      },
+      {
+        id: 'silicon-qwen-2.5',
+        name: '硅基 Qwen 2.5 7B (永久免费)',
+        tier: 'free',
+        provider: 'siliconflow',
+        latency: '~200ms',
+        available: true,
+        description: '通义千问大模型，西中地道俚语转换水平极高',
+      },
+      {
+        id: 'groq-llama-3',
+        name: 'Groq Llama-3.1 8B (超快)',
+        tier: 'free',
+        provider: 'groq',
+        latency: '~100ms',
+        available: true,
+        description: '超强LPU推演速度，端到端延迟低至100ms',
+      },
+      {
         id: 'gemini-2.5-flash',
         name: 'Gemini 2.5 Flash (推荐)',
         tier: 'free',
@@ -36,13 +63,31 @@ export async function fetchAvailableModels(): Promise<ModelOption[]> {
         description: '响应极快，语义自然，免费额度充裕',
       },
       {
-        id: 'groq-llama-3',
-        name: 'Groq Llama-3.3 70B',
+        id: 'sambanova-llama',
+        name: 'SambaNova Llama-3.1 (极速)',
         tier: 'free',
-        provider: 'groq',
-        latency: '~150ms',
+        provider: 'sambanova',
+        latency: '~100ms',
         available: true,
-        description: '超强推演速度，端到端延迟低至150ms',
+        description: '超算芯片级推理速度，专为同声传译设计',
+      },
+      {
+        id: 'zhipu-glm-4',
+        name: '智谱 GLM-4-Flash (免费)',
+        tier: 'free',
+        provider: 'zhipu',
+        latency: '~250ms',
+        available: true,
+        description: '智谱官方0元免费调用，中文表达地道流畅',
+      },
+      {
+        id: 'openrouter-free',
+        name: 'OpenRouter Free (聚合)',
+        tier: 'free',
+        provider: 'openrouter',
+        latency: '~300ms',
+        available: true,
+        description: '多路免费大模型聚合路由，高可用兜底',
       },
       {
         id: 'gpt-4o-mini',
@@ -67,7 +112,7 @@ export async function fetchAvailableModels(): Promise<ModelOption[]> {
 }
 
 export async function testApiKey(
-  provider: 'gemini' | 'groq' | 'openai',
+  provider: 'gemini' | 'groq' | 'openai' | 'cf-ai' | 'siliconflow' | 'zhipu' | 'sambanova' | 'openrouter',
   apiKey: string
 ): Promise<TestKeyResult> {
   try {

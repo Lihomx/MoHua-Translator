@@ -15,7 +15,7 @@ export interface ModelOption {
   id: string;
   name: string;
   tier: 'free' | 'pro';
-  provider: 'google' | 'groq' | 'openai';
+  provider: 'google' | 'groq' | 'openai' | 'cloudflare' | 'siliconflow' | 'zhipu' | 'sambanova' | 'openrouter';
   latency: string;
   available: boolean;
   description: string;

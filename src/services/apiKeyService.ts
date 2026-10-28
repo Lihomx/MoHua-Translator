@@ -4,6 +4,10 @@ export interface CustomApiKeys {
   gemini?: string;
   groq?: string;
   openai?: string;
+  siliconflow?: string;
+  zhipu?: string;
+  sambanova?: string;
+  openrouter?: string;
 }
 
 const STORAGE_KEY = 'mohua_custom_api_keys';
