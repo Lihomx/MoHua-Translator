@@ -66,17 +66,18 @@ export const Header: React.FC<HeaderProps> = ({
             <span className="text-[10px] opacity-70">▾</span>
           </button>
 
-          {/* Voice Output Toggle */}
+          {/* Voice Output Toggle (Subtitle Mode vs Audio Readout) */}
           <button
             onClick={onToggleMute}
-            className={`p-2 rounded-full border transition-all ${
+            className={`flex items-center gap-1 px-2.5 py-1.5 rounded-full border text-xs transition-all active:scale-95 ${
               isMuted
-                ? 'bg-gray-800 border-gray-700 text-gray-400 hover:text-gray-200'
-                : 'bg-indigo-600/20 border-indigo-500/40 text-indigo-400 hover:bg-indigo-600/30'
+                ? 'bg-gray-800/90 border-gray-700 text-gray-300 hover:text-emerald-300'
+                : 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
             }`}
-            title={isMuted ? '点击开启中文语音朗读' : '已开启语音朗读，点击静音'}
+            title={isMuted ? '当前为【纯字幕同传】（推荐外放使用，拾音最灵敏且不漏词）。点击可开启中文语音朗读。' : '已开启【语音朗读】（建议佩戴耳机，避免外放声音干扰麦克风）。点击恢复纯字幕。'}
           >
-            {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+            {isMuted ? <VolumeX className="w-3.5 h-3.5 text-gray-400" /> : <Volume2 className="w-3.5 h-3.5 text-emerald-400" />}
+            <span className="text-[11px] font-medium hidden sm:inline">{isMuted ? '字幕模式' : '朗读模式'}</span>
           </button>
 
           {/* Discreet Admin Portal Link */}

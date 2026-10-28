@@ -27,16 +27,20 @@ export const LiveTranscript: React.FC<LiveTranscriptProps> = ({
     <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
       {/* Empty State / Listening Warmup */}
       {messages.length === 0 && !interimText && (
-        <div className="flex flex-col items-center justify-center h-64 text-center text-gray-500">
+        <div className="flex flex-col items-center justify-center h-64 text-center text-gray-500 px-4">
           <div className="w-14 h-14 rounded-full bg-gray-900 border border-gray-800 flex items-center justify-center mb-3">
             <Radio className={`w-6 h-6 ${isListening ? 'text-emerald-400 animate-pulse' : 'text-gray-600'}`} />
           </div>
           <p className="text-gray-300 font-medium text-sm">
-            {isListening ? '已就绪，正在实时捕捉墨西哥西语...' : '听筒已暂停'}
+            {isListening ? '已就绪，正在高灵敏捕捉墨西哥西语...' : '听筒已暂停'}
           </p>
-          <p className="text-gray-500 text-xs mt-1 max-w-xs">
+          <p className="text-gray-400 text-xs mt-1.5 max-w-xs leading-relaxed">
             当对方开口说西班牙语时，屏幕将以毫秒级速度实时跳出双语字幕
           </p>
+          <div className="mt-4 px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-[11px] text-emerald-400/90 text-left space-y-1">
+            <div>⚡ <b>硬件自动增益 (AGC)</b>：已自动放大弱音/远距轻语</div>
+            <div>💡 <b>小声拾音建议</b>：轻声说话时离麦克风近一些（5~15cm），或随时点击底部【打字】模式直接输入</div>
+          </div>
         </div>
       )}
 

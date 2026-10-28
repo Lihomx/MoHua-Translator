@@ -18,7 +18,7 @@ export function App() {
   const [messages, setMessages] = useState<TranslationMessage[]>([]);
   const [interimText, setInterimText] = useState<string>('');
   const [isListening, setIsListening] = useState<boolean>(false);
-  const [isMuted, setIsMuted] = useState<boolean>(false);
+  const [isMuted, setIsMuted] = useState<boolean>(true); // 默认字幕模式，防止手机外放声音压制麦克风导致漏听
   const [isWakeLockActive, setIsWakeLockActive] = useState<boolean>(false);
 
   // Models state
@@ -43,6 +43,9 @@ export function App() {
 
   // 1. Fetch available models on load
   useEffect(() => {
+    // Initialize speech synthesis to muted by default
+    speechSynthesisService.setMuted(true);
+
     fetchAvailableModels().then((data) => {
       if (data && data.length > 0) {
         setModels(data);

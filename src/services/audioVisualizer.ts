@@ -23,8 +23,8 @@ class AudioVisualizerService {
         this.mediaStream = await navigator.mediaDevices.getUserMedia({
           audio: {
             echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
+            noiseSuppression: false, // 禁用降噪，避免将低声细语当成噪音消除
+            autoGainControl: true,   // 硬件级自动增益，大幅提升拾音距离与敏感度
           },
         });
       }
