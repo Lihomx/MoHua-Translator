@@ -484,12 +484,25 @@ async function callGemini(apiKey: string, contents: any[], systemPrompt?: string
   throw new Error(lastErr || "Gemini 所有模型均无法连接");
 }
 
-// Cloudflare Workers AI caller
+// Cloudflare Workers AI caller with resilient model fallback
 async function callCloudflareAI(ai: any, messages: any[]): Promise<{ text: string; model: string }> {
-  const model = "@cf/meta/llama-3.1-8b-instruct";
-  const res: any = await ai.run(model, { messages, max_tokens: 500, temperature: 0.2 });
-  const text = typeof res === "string" ? res : (res?.response || res?.text || "");
-  return { text, model };
+  const models = [
+    "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+    "@cf/meta/llama-3.2-3b-instruct",
+    "@cf/meta/llama-3-8b-instruct",
+    "@cf/meta/llama-3.2-1b-instruct",
+  ];
+  let lastErr = "";
+  for (const m of models) {
+    try {
+      const res: any = await ai.run(m, { messages, max_tokens: 500, temperature: 0.2 });
+      const text = typeof res === "string" ? res : (res?.response || res?.text || "");
+      if (text) return { text, model: m };
+    } catch (e: any) {
+      lastErr = e.message;
+    }
+  }
+  throw new Error(lastErr || "Cloudflare Workers AI 未响应");
 }
 
 // SiliconFlow caller (Qwen 2.5)
@@ -564,10 +577,26 @@ async function runKeyTest(provider: string, apiKey: string | undefined, env: Env
   try {
     if (provider === "cf-ai") {
       if (!env.AI) throw new Error("Cloudflare Workers AI 绑定未启用");
-      await env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
-        messages: [{ role: "user", content: "ping" }],
-        max_tokens: 1,
-      });
+      const testModels = [
+        "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+        "@cf/meta/llama-3.2-3b-instruct",
+        "@cf/meta/llama-3-8b-instruct",
+      ];
+      let ok = false;
+      let lastErr = "";
+      for (const m of testModels) {
+        try {
+          await env.AI.run(m, {
+            messages: [{ role: "user", content: "ping" }],
+            max_tokens: 1,
+          });
+          ok = true;
+          break;
+        } catch (e: any) {
+          lastErr = e.message;
+        }
+      }
+      if (!ok) throw new Error(lastErr || "Cloudflare Workers AI 测试失败");
     } else if (provider === "gemini") {
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${keyToTest}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text()).slice(0, 150)}`);
