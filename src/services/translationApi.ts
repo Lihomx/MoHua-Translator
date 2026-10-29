@@ -1,5 +1,5 @@
-// Translation API Client
-// Calls Cloudflare Pages Function `/api/translate` and `/api/models` and `/api/test-key`
+// Translation & Audio API Client
+// Calls Cloudflare Worker `/api/translate`, `/api/models`, `/api/test-key`, and `/api/transcribe`
 
 import type { ModelOption } from '../types';
 import { apiKeyService } from './apiKeyService';
@@ -9,12 +9,22 @@ export interface TranslateResult {
   provider?: string;
   modelUsed?: string;
   durationMs: number;
+  isFallback?: boolean;
+  requestedModel?: string;
+  fallbackReason?: string;
 }
 
 export interface TestKeyResult {
   ok: boolean;
   latencyMs?: number;
   error?: string;
+}
+
+export interface TranscribeResult {
+  code: number;
+  text: string;
+  provider?: string;
+  empty?: boolean;
 }
 
 export async function fetchAvailableModels(): Promise<ModelOption[]> {
@@ -33,7 +43,7 @@ export async function fetchAvailableModels(): Promise<ModelOption[]> {
         provider: 'cloudflare',
         latency: '~180ms',
         available: true,
-        description: '系统内置免费运行，无需填写Key即可使用',
+        description: '系统原生免Key运行，打开即用，每日1万次免费',
       },
       {
         id: 'silicon-qwen-2.5',
@@ -41,8 +51,8 @@ export async function fetchAvailableModels(): Promise<ModelOption[]> {
         tier: 'free',
         provider: 'siliconflow',
         latency: '~200ms',
-        available: true,
-        description: '通义千问大模型，西中地道俚语转换水平极高',
+        available: false,
+        description: '阿里通义千问，西中口语俚语互译水平极高',
       },
       {
         id: 'groq-llama-3',
@@ -50,7 +60,7 @@ export async function fetchAvailableModels(): Promise<ModelOption[]> {
         tier: 'free',
         provider: 'groq',
         latency: '~100ms',
-        available: true,
+        available: false,
         description: '超强LPU推演速度，端到端延迟低至100ms',
       },
       {
@@ -59,7 +69,7 @@ export async function fetchAvailableModels(): Promise<ModelOption[]> {
         tier: 'free',
         provider: 'google',
         latency: '~200ms',
-        available: true,
+        available: false,
         description: '响应极快，语义自然，免费额度充裕',
       },
       {
@@ -68,7 +78,7 @@ export async function fetchAvailableModels(): Promise<ModelOption[]> {
         tier: 'free',
         provider: 'sambanova',
         latency: '~100ms',
-        available: true,
+        available: false,
         description: '超算芯片级推理速度，专为同声传译设计',
       },
       {
@@ -77,7 +87,7 @@ export async function fetchAvailableModels(): Promise<ModelOption[]> {
         tier: 'free',
         provider: 'zhipu',
         latency: '~250ms',
-        available: true,
+        available: false,
         description: '智谱官方0元免费调用，中文表达地道流畅',
       },
       {
@@ -86,7 +96,7 @@ export async function fetchAvailableModels(): Promise<ModelOption[]> {
         tier: 'free',
         provider: 'openrouter',
         latency: '~300ms',
-        available: true,
+        available: false,
         description: '多路免费大模型聚合路由，高可用兜底',
       },
       {
@@ -95,7 +105,7 @@ export async function fetchAvailableModels(): Promise<ModelOption[]> {
         tier: 'pro',
         provider: 'openai',
         latency: '~350ms',
-        available: true,
+        available: false,
         description: '顶级拉美与墨西哥俚语理解，语义极其地道',
       },
       {
@@ -104,7 +114,7 @@ export async function fetchAvailableModels(): Promise<ModelOption[]> {
         tier: 'pro',
         provider: 'google',
         latency: '~450ms',
-        available: true,
+        available: false,
         description: '高复杂度长句、商务、学术同传精翻',
       },
     ];
@@ -133,7 +143,8 @@ export async function translateText(
   sourceLang: 'es-MX' | 'zh-CN',
   targetLang: 'zh-CN' | 'es-MX',
   modelId: string,
-  modelTier: 'free' | 'pro'
+  modelTier: 'free' | 'pro',
+  context: Array<{ sourceText: string; translatedText: string }> = []
 ): Promise<TranslateResult> {
   const startTime = Date.now();
   const customKeys = apiKeyService.getKeys();
@@ -151,6 +162,7 @@ export async function translateText(
         modelId,
         modelTier,
         customKeys,
+        context: context.slice(-3), // Send recent 3 turns for context-coherent translation
       }),
     });
 
@@ -170,9 +182,35 @@ export async function translateText(
       provider: data.provider,
       modelUsed: data.modelUsed,
       durationMs,
+      isFallback: data.isFallback,
+      requestedModel: data.requestedModel,
+      fallbackReason: data.fallbackReason,
     };
   } catch (err: any) {
     console.error('Translation error:', err);
     throw err;
   }
+}
+
+/**
+ * Cloud Whisper ASR API
+ * Sends audio blob (recorded via standard MediaRecorder) to server-side Whisper (Groq/Cloudflare)
+ * Works on 100% of devices including PDAs without Google Speech Services.
+ */
+export async function transcribeAudioBlob(blob: Blob): Promise<TranscribeResult> {
+  const formData = new FormData();
+  formData.append('file', blob, 'recording.webm');
+
+  const res = await fetch('/api/transcribe', {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const errorJson = await res.json().catch(() => null);
+    throw new Error(errorJson?.error || `语音转文字失败 HTTP ${res.status}`);
+  }
+
+  const data = await res.json();
+  return data;
 }

@@ -1,6 +1,6 @@
 import React from 'react';
-import { Volume2, VolumeX, Sparkles, Smartphone, ShieldCheck } from 'lucide-react';
-import type { ModelOption } from '../types';
+import { Volume2, VolumeX, Sparkles, Smartphone, ShieldCheck, Download, Users, Cloud, Radio } from 'lucide-react';
+import type { ModelOption, AsrEngineMode } from '../types';
 
 interface HeaderProps {
   currentModel: ModelOption;
@@ -9,6 +9,10 @@ interface HeaderProps {
   onOpenModelModal: () => void;
   isWakeLockActive: boolean;
   isListening: boolean;
+  asrMode: AsrEngineMode;
+  onToggleAsrMode: () => void;
+  onOpenFaceToFace: () => void;
+  onExportSession: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -18,77 +22,112 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenModelModal,
   isWakeLockActive,
   isListening,
+  asrMode,
+  onToggleAsrMode,
+  onOpenFaceToFace,
+  onExportSession,
 }) => {
   return (
-    <header className="sticky top-0 z-40 bg-[#0b0f19]/90 backdrop-blur-md border-b border-gray-800/80 px-4 py-3 pt-safe">
+    <header className="sticky top-0 z-40 bg-[#0b0f19]/90 backdrop-blur-md border-b border-gray-800/80 px-3.5 py-2.5 pt-safe">
       <div className="flex items-center justify-between max-w-lg mx-auto">
-        {/* Brand & Mode */}
+        {/* Brand & Mode info */}
         <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center shadow-lg shadow-emerald-500/20 text-white font-bold text-sm">
+          <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center shadow-lg shadow-emerald-500/20 text-white font-bold text-sm shrink-0">
             墨
           </div>
           <div>
             <div className="flex items-center gap-1.5">
-              <span className="font-bold text-base tracking-tight text-white">MoHua 墨华同传</span>
-              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 font-medium border border-emerald-500/20">
+              <span className="font-bold text-sm tracking-tight text-white">MoHua 墨华</span>
+              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-emerald-500/10 text-emerald-400 font-medium border border-emerald-500/20">
                 es-MX ➔ zh
               </span>
             </div>
-            <div className="flex items-center gap-2 text-[11px] text-gray-400">
+            <div className="flex items-center gap-2 text-[10px] text-gray-400">
               <span className="flex items-center gap-1">
                 <span className={`w-1.5 h-1.5 rounded-full ${isListening ? 'bg-emerald-400 animate-pulse' : 'bg-gray-500'}`} />
-                {isListening ? '实时拾音中' : '拾音暂停'}
+                {isListening ? '拾音中' : '已暂停'}
               </span>
               {isWakeLockActive && (
-                <span className="flex items-center gap-0.5 text-blue-400">
-                  <Smartphone className="w-3 h-3" />
-                  屏幕常亮
+                <span className="flex items-center gap-0.5 text-blue-400 hidden xs:inline-flex">
+                  <Smartphone className="w-2.5 h-2.5" />
+                  常亮
                 </span>
               )}
             </div>
           </div>
         </div>
 
-        {/* Right Controls: Model Switcher + Voice Output Toggle + Admin Portal Link */}
-        <div className="flex items-center gap-2">
-          {/* Prominent Model Switcher Button for ordinary users */}
+        {/* Action Controls Toolbar */}
+        <div className="flex items-center gap-1.5">
+          {/* 1. ASR Engine Mode Toggle (Local Web Speech vs Cloud Whisper) */}
+          <button
+            onClick={onToggleAsrMode}
+            className={`flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-medium border transition-all active:scale-95 ${
+              asrMode === 'cloud-whisper'
+                ? 'bg-sky-500/15 border-sky-500/30 text-sky-300'
+                : 'bg-gray-900 border-gray-800 text-gray-400 hover:text-gray-200'
+            }`}
+            title={asrMode === 'cloud-whisper' ? '当前：云端 Whisper 引擎（高灵敏·PDA免装引擎）。点击切换为本地引擎' : '当前：本地极速引擎。点击切换为云端 Whisper 引擎'}
+          >
+            {asrMode === 'cloud-whisper' ? <Cloud className="w-3 h-3 text-sky-400" /> : <Radio className="w-3 h-3 text-gray-400" />}
+            <span className="hidden sm:inline">{asrMode === 'cloud-whisper' ? '云端Whisper' : '本地引擎'}</span>
+          </button>
+
+          {/* 2. Face-to-Face Dual-Screen Mode Button */}
+          <button
+            onClick={onOpenFaceToFace}
+            className="p-1.5 rounded-full border bg-gray-900 border-gray-800 text-gray-400 hover:text-emerald-400 active:scale-95 transition-all"
+            title="开启桌面平放【双屏对坐模式】（双方各看自己那一侧的大字双语）"
+          >
+            <Users className="w-3.5 h-3.5" />
+          </button>
+
+          {/* 3. Export Session Button */}
+          <button
+            onClick={onExportSession}
+            className="p-1.5 rounded-full border bg-gray-900 border-gray-800 text-gray-400 hover:text-emerald-400 active:scale-95 transition-all"
+            title="导出当前会话双语记录 (TXT)"
+          >
+            <Download className="w-3.5 h-3.5" />
+          </button>
+
+          {/* 4. Model Switcher Pill */}
           <button
             onClick={onOpenModelModal}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border shadow-sm transition-all active:scale-95 ${
+            className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold border shadow-sm transition-all active:scale-95 ${
               currentModel.tier === 'pro'
                 ? 'bg-gradient-to-r from-amber-500/15 to-orange-500/15 border-amber-500/40 text-amber-300'
                 : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/20'
             }`}
-            title="点击切换同传模型"
+            title="点击切换同传大模型"
           >
-            <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
-            <span className="max-w-[90px] truncate">{currentModel.name.split(' ')[0]}</span>
-            <span className="text-[10px] opacity-70">▾</span>
+            <Sparkles className="w-3 h-3 text-emerald-400" />
+            <span className="max-w-[70px] truncate">{currentModel.name.split(' ')[0]}</span>
+            <span className="text-[9px] opacity-70">▾</span>
           </button>
 
-          {/* Voice Output Toggle (Subtitle Mode vs Audio Readout) */}
+          {/* 5. Voice Output Toggle (Subtitle Mode vs Audio Readout) */}
           <button
             onClick={onToggleMute}
-            className={`flex items-center gap-1 px-2.5 py-1.5 rounded-full border text-xs transition-all active:scale-95 ${
+            className={`p-1.5 rounded-full border transition-all active:scale-95 ${
               isMuted
-                ? 'bg-gray-800/90 border-gray-700 text-gray-300 hover:text-emerald-300'
+                ? 'bg-gray-900 border-gray-800 text-gray-400 hover:text-emerald-300'
                 : 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
             }`}
-            title={isMuted ? '当前为【纯字幕同传】（推荐外放使用，拾音最灵敏且不漏词）。点击可开启中文语音朗读。' : '已开启【语音朗读】（建议佩戴耳机，避免外放声音干扰麦克风）。点击恢复纯字幕。'}
+            title={isMuted ? '当前为【纯字幕同传】（推荐：外放麦克风互不干扰，不漏词）。点击开启中文朗读。' : '已开启【语音朗读】（建议佩戴耳机，避免外放声音干扰麦克风）。点击恢复纯字幕。'}
           >
-            {isMuted ? <VolumeX className="w-3.5 h-3.5 text-gray-400" /> : <Volume2 className="w-3.5 h-3.5 text-emerald-400" />}
-            <span className="text-[11px] font-medium hidden sm:inline">{isMuted ? '字幕模式' : '朗读模式'}</span>
+            {isMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5 text-emerald-400" />}
           </button>
 
-          {/* Discreet Admin Portal Link */}
+          {/* 6. Discreet Admin Portal Link */}
           <a
             href="/admin"
             target="_blank"
             rel="noreferrer"
-            className="p-2 rounded-full border bg-gray-900 border-gray-800 text-gray-500 hover:text-emerald-400 hover:border-emerald-500/30 active:scale-95 transition-all"
+            className="p-1.5 rounded-full border bg-gray-900 border-gray-800 text-gray-500 hover:text-emerald-400 hover:border-emerald-500/30 active:scale-95 transition-all"
             title="管理后台（配置/修改 API Key）"
           >
-            <ShieldCheck className="w-4 h-4" />
+            <ShieldCheck className="w-3.5 h-3.5" />
           </a>
         </div>
       </div>

@@ -9,6 +9,12 @@ export interface TranslationMessage {
   status: 'interim' | 'translating' | 'done' | 'error';
   errorMessage?: string;
   isManualInput?: boolean;
+  modelUsed?: string;
+  provider?: string;
+  durationMs?: number;
+  isFallback?: boolean;
+  requestedModel?: string;
+  fallbackReason?: string;
 }
 
 export interface ModelOption {
@@ -22,3 +28,4 @@ export interface ModelOption {
 }
 
 export type ListeningState = 'idle' | 'listening' | 'paused' | 'holding-to-talk';
+export type AsrEngineMode = 'local' | 'cloud-whisper';

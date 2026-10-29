@@ -5,12 +5,16 @@ import { LiveTranscript } from './components/LiveTranscript';
 import { BottomControls } from './components/BottomControls';
 import { TextInputModal } from './components/TextInputModal';
 import { ModelSelectorModal } from './components/ModelSelectorModal';
-import type { TranslationMessage, ModelOption } from './types';
+import { FaceToFaceView } from './components/FaceToFaceView';
+import type { TranslationMessage, ModelOption, AsrEngineMode } from './types';
 import { speechRecognitionService } from './services/speechRecognition';
+import { cloudAsrService } from './services/cloudAsrService';
 import { speechSynthesisService } from './services/speechSynthesis';
 import { wakeLockService } from './services/wakeLock';
 import { fetchAvailableModels, translateText } from './services/translationApi';
 import { apiKeyService } from './services/apiKeyService';
+
+const STORAGE_KEY = 'mohua_transcript_history_v1';
 
 export function App() {
   const [hasStarted, setHasStarted] = useState<boolean>(false);
@@ -18,8 +22,12 @@ export function App() {
   const [messages, setMessages] = useState<TranslationMessage[]>([]);
   const [interimText, setInterimText] = useState<string>('');
   const [isListening, setIsListening] = useState<boolean>(false);
-  const [isMuted, setIsMuted] = useState<boolean>(true); // 默认字幕模式，防止手机外放声音压制麦克风导致漏听
+  const [isMuted, setIsMuted] = useState<boolean>(true); // 默认纯字幕模式，麦克风100%全开不漏词
   const [isWakeLockActive, setIsWakeLockActive] = useState<boolean>(false);
+
+  // ASR Engine Mode: 'local' (Web Speech API) vs 'cloud-whisper' (Cloud Whisper ASR)
+  const [asrMode, setAsrMode] = useState<AsrEngineMode>('local');
+  const [isFaceToFaceActive, setIsFaceToFaceActive] = useState<boolean>(false);
 
   // Models state
   const [models, setModels] = useState<ModelOption[]>([]);
@@ -38,76 +46,140 @@ export function App() {
   const [isTextInputModalOpen, setIsTextInputModalOpen] = useState<boolean>(false);
   const [isHoldingToTalk, setIsHoldingToTalk] = useState<boolean>(false);
 
-  // References for hold-to-talk Chinese capture
+  // Active references to prevent React stale closures (Fixing Bug B1 & B5)
+  const currentModelRef = useRef<ModelOption>(currentModel);
+  const messagesRef = useRef<TranslationMessage[]>(messages);
+  const asrModeRef = useRef<AsrEngineMode>(asrMode);
   const holdToTalkTranscriptRef = useRef<string>('');
 
-  // 1. Fetch available models on load
   useEffect(() => {
-    // Initialize speech synthesis to muted by default
+    currentModelRef.current = currentModel;
+  }, [currentModel]);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+    // Persist latest 50 messages to localStorage
+    if (messages.length > 0) {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(messages.slice(-50)));
+      } catch (e) {
+        // ignore
+      }
+    }
+  }, [messages]);
+
+  useEffect(() => {
+    asrModeRef.current = asrMode;
+  }, [asrMode]);
+
+  // 1. Initialize: load models, stored history, and detect ASR support
+  useEffect(() => {
     speechSynthesisService.setMuted(true);
 
+    // Restore saved messages if available
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setMessages(parsed);
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+
+    // Auto-detect if device has Google Speech Services; if not (e.g. industrial PDA), default to Cloud Whisper
+    if (!speechRecognitionService.getIsSupported()) {
+      setAsrMode('cloud-whisper');
+      asrModeRef.current = 'cloud-whisper';
+    }
+
+    // Fetch live models status
     fetchAvailableModels().then((data) => {
       if (data && data.length > 0) {
         setModels(data);
         const savedModelId = apiKeyService.getActiveModelId();
-        const initialModel = data.find((m) => m.id === savedModelId) || data.find((m) => m.id === 'gemini-2.5-flash') || data[0];
+        const initialModel =
+          data.find((m) => m.id === savedModelId) ||
+          data.find((m) => m.id === 'gemini-2.5-flash') ||
+          data[0];
         setCurrentModel(initialModel);
+        currentModelRef.current = initialModel;
       }
     });
   }, []);
 
-  // 2. Main Continuous Listening start helper (es-MX ➔ zh-CN)
+  // 2. Start Continuous Listening Helper according to active ASR mode
   const startContinuousListening = () => {
-    speechRecognitionService.startContinuousListening('es-MX', {
-      onInterim: (text) => {
-        setInterimText(text);
-      },
-      onFinal: (text) => {
-        setInterimText('');
-        if (!text || text.trim().length === 0) return;
-        handleMexicanSpanishFinalUtterance(text.trim());
-      },
-      onError: (err) => {
-        console.warn('SpeechRecognition error:', err);
-      },
-      onListeningChange: (listening) => {
-        setIsListening(listening);
-      },
-    });
+    const activeMode = asrModeRef.current;
+
+    if (activeMode === 'cloud-whisper') {
+      // Cloud Whisper Mode (for PDA or ultra-low volume environments)
+      speechRecognitionService.stopContinuousListening();
+      cloudAsrService.startContinuous({
+        onInterim: (text) => setInterimText(text),
+        onFinal: (text) => {
+          setInterimText('');
+          if (!text || text.trim().length === 0) return;
+          handleMexicanSpanishFinalUtterance(text.trim());
+        },
+        onError: (err) => console.warn('Cloud ASR error:', err),
+        onListeningChange: (listening) => setIsListening(listening),
+      });
+    } else {
+      // Local Web Speech API Mode (Ultra-fast, zero-cloud audio bandwidth)
+      cloudAsrService.stopContinuous();
+      speechRecognitionService.startContinuousListening('es-MX', {
+        onInterim: (text) => setInterimText(text),
+        onFinal: (text) => {
+          setInterimText('');
+          if (!text || text.trim().length === 0) return;
+          handleMexicanSpanishFinalUtterance(text.trim());
+        },
+        onError: (err) => {
+          console.warn('SpeechRecognition error:', err);
+          // If PDA throws service-not-allowed, auto switch to Cloud Whisper!
+          if (err.includes('Google 语音识别引擎') || err.includes('service-not-allowed')) {
+            console.log('Auto-switching to Cloud Whisper mode due to missing Google Speech services...');
+            setAsrMode('cloud-whisper');
+            asrModeRef.current = 'cloud-whisper';
+            startContinuousListening();
+          }
+        },
+        onListeningChange: (listening) => setIsListening(listening),
+      });
+    }
+  };
+
+  const stopContinuousListening = () => {
+    speechRecognitionService.stopContinuousListening();
+    cloudAsrService.stopContinuous();
+    setIsListening(false);
   };
 
   // 3. User taps "轻触开启同传" on StartOverlay
   const handleStartSession = async () => {
     setStartError(null);
-
-    // Check browser speech recognition support
-    if (!speechRecognitionService.getIsSupported()) {
-      setStartError('PDA或当前设备未检测到语音识别。推荐点击下方直接进入【打字同传模式】，或安装 Google 语音服务。');
-      return;
-    }
-
     try {
-      // Engage Screen WakeLock to prevent sleep/lock during interpreting
       const locked = await wakeLockService.request();
       setIsWakeLockActive(locked);
 
-      // Start continuous listening
       startContinuousListening();
       setHasStarted(true);
     } catch (err: any) {
       console.error('Session start error:', err);
-      setStartError('PDA无法启动麦克风语音，您可以直接点击下方进入【打字同传】');
+      setStartError('启动麦克风录音失败，请确认允许麦克风权限');
     }
   };
 
-  // Alternative startup for PDA or typing-only users
   const handleStartTypingSession = () => {
     setStartError(null);
     setHasStarted(true);
     setIsTextInputModalOpen(true);
   };
 
-  // 4. Translate Mexican Spanish utterance to Chinese
+  // 4. Translate Mexican Spanish utterance to Chinese (Context-aware & Dynamic Model)
   const handleMexicanSpanishFinalUtterance = async (spanishText: string) => {
     const messageId = `msg-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
     const newMsg: TranslationMessage = {
@@ -121,13 +193,21 @@ export function App() {
 
     setMessages((prev) => [...prev, newMsg]);
 
+    // Read current model & context from refs (avoids stale closures!)
+    const activeModel = currentModelRef.current;
+    const recentContext = messagesRef.current
+      .filter((m) => m.status === 'done' && m.translatedText)
+      .slice(-3)
+      .map((m) => ({ sourceText: m.sourceText, translatedText: m.translatedText }));
+
     try {
       const result = await translateText(
         spanishText,
         'es-MX',
         'zh-CN',
-        currentModel.id,
-        currentModel.tier
+        activeModel.id,
+        activeModel.tier,
+        recentContext
       );
 
       setMessages((prev) =>
@@ -137,12 +217,18 @@ export function App() {
                 ...m,
                 status: 'done',
                 translatedText: result.translation,
+                provider: result.provider,
+                modelUsed: result.modelUsed,
+                durationMs: result.durationMs,
+                isFallback: result.isFallback,
+                requestedModel: result.requestedModel,
+                fallbackReason: result.fallbackReason,
               }
             : m
         )
       );
 
-      // Auto-speak Chinese translation if unmuted
+      // Speak Chinese only if user explicitly unmuted (Headphones recommended)
       if (!isMuted && result.translation) {
         speechSynthesisService.speak(result.translation, 'zh-CN');
       }
@@ -164,8 +250,7 @@ export function App() {
   // 5. Toggle Continuous Listening (Pause / Resume)
   const handleToggleListening = () => {
     if (isListening) {
-      speechRecognitionService.stopContinuousListening();
-      setIsListening(false);
+      stopContinuousListening();
     } else {
       startContinuousListening();
     }
@@ -178,7 +263,21 @@ export function App() {
     speechSynthesisService.setMuted(newMuted);
   };
 
-  // 7. Reverse Translation: Text Input Submit (Chinese ➔ Mexican Spanish)
+  // 7. Toggle ASR Engine Mode (Local Web Speech vs Cloud Whisper)
+  const handleToggleAsrMode = () => {
+    const nextMode: AsrEngineMode = asrMode === 'local' ? 'cloud-whisper' : 'local';
+    setAsrMode(nextMode);
+    asrModeRef.current = nextMode;
+
+    if (isListening) {
+      stopContinuousListening();
+      setTimeout(() => {
+        startContinuousListening();
+      }, 150);
+    }
+  };
+
+  // 8. Reverse Translation: Text Input Submit (Chinese ➔ Mexican Spanish)
   const handleTextInputSubmit = async (chineseText: string) => {
     const messageId = `msg-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
     const newMsg: TranslationMessage = {
@@ -193,13 +292,20 @@ export function App() {
 
     setMessages((prev) => [...prev, newMsg]);
 
+    const activeModel = currentModelRef.current;
+    const recentContext = messagesRef.current
+      .filter((m) => m.status === 'done' && m.translatedText)
+      .slice(-3)
+      .map((m) => ({ sourceText: m.sourceText, translatedText: m.translatedText }));
+
     try {
       const result = await translateText(
         chineseText,
         'zh-CN',
         'es-MX',
-        currentModel.id,
-        currentModel.tier
+        activeModel.id,
+        activeModel.tier,
+        recentContext
       );
 
       setMessages((prev) =>
@@ -209,12 +315,18 @@ export function App() {
                 ...m,
                 status: 'done',
                 translatedText: result.translation,
+                provider: result.provider,
+                modelUsed: result.modelUsed,
+                durationMs: result.durationMs,
+                isFallback: result.isFallback,
+                requestedModel: result.requestedModel,
+                fallbackReason: result.fallbackReason,
               }
             : m
         )
       );
 
-      // Automatically speak Mexican Spanish out loud for the other person to hear!
+      // Automatically speak Mexican Spanish out loud for the counterpart
       if (result.translation) {
         speechSynthesisService.speak(result.translation, 'es-MX', true);
       }
@@ -233,10 +345,13 @@ export function App() {
     }
   };
 
-  // 8. Reverse Translation: Push-to-Talk "按住说话" (Hold to Speak Chinese ➔ Translate & Speak Spanish)
+  // 9. Reverse Translation: Push-to-Talk "按住说话" (Hold to Speak Chinese ➔ Speak Spanish)
   const handleStartHoldToTalk = () => {
     setIsHoldingToTalk(true);
     holdToTalkTranscriptRef.current = '';
+
+    // Stop continuous listening temporarily
+    stopContinuousListening();
 
     speechRecognitionService.startPushToTalk('zh-CN', {
       onInterim: (text) => {
@@ -267,9 +382,33 @@ export function App() {
     }, 400);
   };
 
+  // 10. Clear & Export Session Records
   const handleClearHistory = () => {
     setMessages([]);
     setInterimText('');
+    localStorage.removeItem(STORAGE_KEY);
+  };
+
+  const handleExportSession = () => {
+    if (messages.length === 0) {
+      alert('当前暂无可导出的翻译记录');
+      return;
+    }
+
+    const lines = messages.map((m) => {
+      const time = new Date(m.timestamp).toLocaleTimeString();
+      const speaker = m.direction === 'es-to-zh' ? '🇲🇽 墨西哥西语' : '🇨🇳 中文发言';
+      return `[${time}] ${speaker}\n原文: ${m.sourceText}\n译文: ${m.translatedText || '(未完成)'}\n`;
+    });
+
+    const content = `MoHua 墨华同传 - 对话记录导出\n导出时间: ${new Date().toLocaleString()}\n总记录数: ${messages.length} 句\n\n${lines.join('\n')}`;
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `MoHua_同传记录_${new Date().toISOString().slice(0, 10)}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   return (
@@ -283,6 +422,17 @@ export function App() {
         />
       )}
 
+      {/* Face-to-Face Dual-Screen Split View */}
+      {isFaceToFaceActive && (
+        <FaceToFaceView
+          messages={messages}
+          interimText={interimText}
+          isListening={isListening}
+          onClose={() => setIsFaceToFaceActive(false)}
+          onToggleListening={handleToggleListening}
+        />
+      )}
+
       {/* Main App Layout */}
       <Header
         currentModel={currentModel}
@@ -291,6 +441,10 @@ export function App() {
         onOpenModelModal={() => setIsModelModalOpen(true)}
         isWakeLockActive={isWakeLockActive}
         isListening={isListening}
+        asrMode={asrMode}
+        onToggleAsrMode={handleToggleAsrMode}
+        onOpenFaceToFace={() => setIsFaceToFaceActive(true)}
+        onExportSession={handleExportSession}
       />
 
       {/* Live Transcript Waterfall */}
@@ -318,7 +472,7 @@ export function App() {
         onSubmit={handleTextInputSubmit}
       />
 
-      {/* Modal: Model Selector (Users switch models here freely with 0 API keys) */}
+      {/* Modal: Model Selector (Users switch models freely with 0 API keys) */}
       <ModelSelectorModal
         isOpen={isModelModalOpen}
         onClose={() => setIsModelModalOpen(false)}
@@ -326,6 +480,7 @@ export function App() {
         currentModel={currentModel}
         onSelectModel={(model) => {
           setCurrentModel(model);
+          currentModelRef.current = model;
           apiKeyService.setActiveModelId(model.id);
         }}
       />

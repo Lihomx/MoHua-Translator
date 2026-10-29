@@ -113,9 +113,27 @@ export const TranscriptCard: React.FC<TranscriptCardProps> = ({ message }) => {
         )}
 
         {message.status === 'done' && (
-          <p className="text-white text-base font-semibold leading-relaxed tracking-tight select-text">
-            {message.translatedText}
-          </p>
+          <div>
+            <p className="text-white text-base font-semibold leading-relaxed tracking-tight select-text mb-1.5">
+              {message.translatedText}
+            </p>
+            {/* Model & Latency badge with transparent fallback indicator */}
+            <div className="flex items-center gap-1.5 text-[10px] text-gray-500 pt-0.5">
+              {message.provider && (
+                <span className="px-1.5 py-0.5 rounded bg-gray-800/80 text-gray-400 font-mono">
+                  {message.provider} {message.durationMs ? `· ${message.durationMs}ms` : ''}
+                </span>
+              )}
+              {message.isFallback && (
+                <span
+                  className="px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/30 text-amber-300 font-medium cursor-help"
+                  title={message.fallbackReason || '所选模型未配置 Key，已自动由 Cloudflare Workers AI 极速兜底'}
+                >
+                  ⚡ 已自动兜底
+                </span>
+              )}
+            </div>
+          </div>
         )}
       </div>
     </div>

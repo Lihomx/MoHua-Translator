@@ -558,6 +558,55 @@ async function callOpenRouter(apiKey: string, messages: any[], model = "meta-lla
   return { text: d.choices?.[0]?.message?.content || "", model };
 }
 
+// Cloud Whisper ASR transcriber (Groq Whisper-large-v3-turbo with Cloudflare Workers AI Whisper fallback)
+async function transcribeAudio(audioBytes: ArrayBuffer, mimeType: string, env: Env): Promise<{ text: string; provider: string }> {
+  // 1. If Groq Key available, call Groq Whisper API (super-fast, ~150ms)
+  if (env.GROQ_API_KEY) {
+    try {
+      const formData = new FormData();
+      const ext = mimeType.includes("webm") ? "webm" : mimeType.includes("wav") ? "wav" : "ogg";
+      const blob = new Blob([audioBytes], { type: mimeType });
+      formData.append("file", blob, `audio.${ext}`);
+      formData.append("model", "whisper-large-v3-turbo");
+      formData.append("language", "es");
+      formData.append("response_format", "json");
+
+      const res = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${env.GROQ_API_KEY}` },
+        body: formData,
+      });
+
+      if (res.ok) {
+        const d: any = await res.json();
+        if (d.text && d.text.trim()) {
+          return { text: d.text.trim(), provider: "groq-whisper" };
+        }
+      }
+    } catch (e: any) {
+      console.warn("Groq whisper transcription exception:", e);
+    }
+  }
+
+  // 2. Native Cloudflare Workers AI Whisper fallback (100% free, 0 keys needed)
+  if (env.AI) {
+    try {
+      const uint8 = new Uint8Array(audioBytes);
+      const res: any = await env.AI.run("@cf/openai/whisper", {
+        audio: [...uint8],
+      });
+      const text = res?.text || "";
+      if (text.trim()) {
+        return { text: text.trim(), provider: "cloudflare-whisper" };
+      }
+    } catch (e: any) {
+      console.warn("Cloudflare Workers AI whisper exception:", e);
+    }
+  }
+
+  throw new Error("语音转文字失败，当前节点未就绪或音频无法识别");
+}
+
 // Core test key runner (Shared between admin and in-app modal)
 async function runKeyTest(provider: string, apiKey: string | undefined, env: Env): Promise<{ ok: boolean; latencyMs?: number; error?: string }> {
   const keyToTest = (apiKey && apiKey !== "[已在环境变量配置]") ? apiKey :
@@ -704,39 +753,80 @@ export default {
       return json(result);
     }
 
-    // ===== TRANSLATION API ROUTES =====
+    // ===== TRANSLATION & AUDIO API ROUTES =====
+
+    // 1. Audio Transcription Endpoint (Cloud Whisper ASR)
+    if (path === "/api/transcribe" && request.method === "POST") {
+      try {
+        const contentType = request.headers.get("content-type") || "";
+        let audioBytes: ArrayBuffer;
+        let mimeType = "audio/webm";
+
+        if (contentType.includes("multipart/form-data")) {
+          const formData = await request.formData();
+          const file = formData.get("file") as File;
+          if (!file) return json({ error: "No audio file provided" }, 400);
+          audioBytes = await file.arrayBuffer();
+          mimeType = file.type || "audio/webm";
+        } else {
+          audioBytes = await request.arrayBuffer();
+          mimeType = contentType || "audio/webm";
+        }
+
+        if (audioBytes.byteLength < 500) {
+          return json({ text: "", empty: true });
+        }
+
+        const result = await transcribeAudio(audioBytes, mimeType, env);
+        return json({ code: 0, text: result.text, provider: result.provider });
+      } catch (err: any) {
+        return json({ error: err.message || "Transcription failed" }, 500);
+      }
+    }
+
+    // 2. Models status endpoint with dynamic key availability
     if (path === "/api/models" && request.method === "GET") {
+      const hasCf = Boolean(env.AI);
+      const hasSilicon = Boolean(env.SILICONFLOW_API_KEY);
+      const hasGroq = Boolean(env.GROQ_API_KEY);
+      const hasGemini = Boolean(env.GEMINI_API_KEY);
+      const hasSamba = Boolean(env.SAMBANOVA_API_KEY);
+      const hasZhipu = Boolean(env.ZHIPU_API_KEY);
+      const hasOpenRouter = Boolean(env.OPENROUTER_API_KEY);
+      const hasOpenAI = Boolean(env.OPENAI_API_KEY);
+
       return json({
         code: 0,
         configuredKeys: {
-          cloudflare: Boolean(env.AI),
-          siliconflow: Boolean(env.SILICONFLOW_API_KEY),
-          groq: Boolean(env.GROQ_API_KEY),
-          gemini: Boolean(env.GEMINI_API_KEY),
-          sambanova: Boolean(env.SAMBANOVA_API_KEY),
-          zhipu: Boolean(env.ZHIPU_API_KEY),
-          openrouter: Boolean(env.OPENROUTER_API_KEY),
-          openai: Boolean(env.OPENAI_API_KEY),
+          cloudflare: hasCf,
+          siliconflow: hasSilicon,
+          groq: hasGroq,
+          gemini: hasGemini,
+          sambanova: hasSamba,
+          zhipu: hasZhipu,
+          openrouter: hasOpenRouter,
+          openai: hasOpenAI,
         },
         models: [
-          { id: "cf-llama-3.1", name: "Cloudflare AI (免Key·免费)", tier: "free", provider: "cloudflare", latency: "~180ms", available: true, description: "系统原生免Key运行，打开即用，每日1万次免费" },
-          { id: "silicon-qwen-2.5", name: "硅基 Qwen 2.5 7B (永久免费)", tier: "free", provider: "siliconflow", latency: "~200ms", available: true, description: "阿里通义千问，西中口语俚语互译水平极高" },
-          { id: "groq-llama-3", name: "Groq Llama-3.1 8B (超快)", tier: "free", provider: "groq", latency: "~100ms", available: true, description: "超强LPU推演速度，端到端延迟低至100ms" },
-          { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash (推荐)", tier: "free", provider: "google", latency: "~200ms", available: true, description: "响应极快，语义自然，免费额度充裕" },
-          { id: "sambanova-llama", name: "SambaNova Llama-3.1 (极速)", tier: "free", provider: "sambanova", latency: "~100ms", available: true, description: "超算芯片级推理速度，专为同声传译设计" },
-          { id: "zhipu-glm-4", name: "智谱 GLM-4-Flash (免费)", tier: "free", provider: "zhipu", latency: "~250ms", available: true, description: "智谱官方0元免费调用，中文表达地道流畅" },
-          { id: "openrouter-free", name: "OpenRouter Free (聚合)", tier: "free", provider: "openrouter", latency: "~300ms", available: true, description: "多路免费大模型聚合路由，高可用兜底" },
-          { id: "gpt-4o-mini", name: "OpenAI GPT-4o-mini", tier: "pro", provider: "openai", latency: "~350ms", available: true, description: "顶级拉美与墨西哥俚语理解，语义极其地道" },
-          { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", tier: "pro", provider: "google", latency: "~450ms", available: true, description: "高复杂度长句、商务、学术同传精翻" },
+          { id: "cf-llama-3.1", name: "Cloudflare AI (免Key·免费)", tier: "free", provider: "cloudflare", latency: "~180ms", available: hasCf, description: "系统原生免Key运行，打开即用，每日1万次免费" },
+          { id: "silicon-qwen-2.5", name: "硅基 Qwen 2.5 7B (永久免费)", tier: "free", provider: "siliconflow", latency: "~200ms", available: hasSilicon, description: "阿里通义千问，西中口语俚语互译水平极高" },
+          { id: "groq-llama-3", name: "Groq Llama-3.1 8B (超快)", tier: "free", provider: "groq", latency: "~100ms", available: hasGroq, description: "超强LPU推演速度，端到端延迟低至100ms" },
+          { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash (推荐)", tier: "free", provider: "google", latency: "~200ms", available: hasGemini, description: "响应极快，语义自然，免费额度充裕" },
+          { id: "sambanova-llama", name: "SambaNova Llama-3.1 (极速)", tier: "free", provider: "sambanova", latency: "~100ms", available: hasSamba, description: "超算芯片级推理速度，专为同声传译设计" },
+          { id: "zhipu-glm-4", name: "智谱 GLM-4-Flash (免费)", tier: "free", provider: "zhipu", latency: "~250ms", available: hasZhipu, description: "智谱官方0元免费调用，中文表达地道流畅" },
+          { id: "openrouter-free", name: "OpenRouter Free (聚合)", tier: "free", provider: "openrouter", latency: "~300ms", available: hasOpenRouter, description: "多路免费大模型聚合路由，高可用兜底" },
+          { id: "gpt-4o-mini", name: "OpenAI GPT-4o-mini", tier: "pro", provider: "openai", latency: "~350ms", available: hasOpenAI, description: "顶级拉美与墨西哥俚语理解，语义极其地道" },
+          { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", tier: "pro", provider: "google", latency: "~450ms", available: hasGemini, description: "高复杂度长句、商务、学术同传精翻" },
         ],
       });
     }
 
+    // 3. Translation endpoint with context-awareness and fallback transparency
     if (path === "/api/translate" && request.method === "POST") {
       let body: any;
       try { body = await request.json(); } catch { return json({ error: "Invalid JSON" }, 400); }
 
-      const { text, sourceLang = "es-MX", targetLang = "zh-CN", modelId = "cf-llama-3.1", customKeys = {} } = body;
+      const { text, sourceLang = "es-MX", targetLang = "zh-CN", modelId = "cf-llama-3.1", customKeys = {}, context = [] } = body;
       if (!text?.trim()) return json({ translation: "" });
 
       const isEsToZh = sourceLang.includes("es") || targetLang.includes("zh");
@@ -750,30 +840,56 @@ export default {
       const sambaKey = (customKeys.sambanova && customKeys.sambanova !== "[已在环境变量配置]") ? customKeys.sambanova : env.SAMBANOVA_API_KEY;
       const openrouterKey = (customKeys.openrouter && customKeys.openrouter !== "[已在环境变量配置]") ? customKeys.openrouter : env.OPENROUTER_API_KEY;
 
+      // Construct context-aware prompt if previous turns exist
+      let userContent = text;
+      if (Array.isArray(context) && context.length > 0) {
+        const historyText = context.slice(-3).map((c: any) => `[前序对话]:\n原文: ${c.sourceText}\n译文: ${c.translatedText}`).join("\n\n");
+        userContent = `${historyText}\n\n[请结合上述上下文，翻译最新句子，保持人称代词和语境连贯，仅输出最终译文]:\n${text}`;
+      }
+
       const messages = [
         { role: "system", content: systemPrompt },
-        { role: "user", content: text },
+        { role: "user", content: userContent },
       ];
 
       // Route priority
       let provider = "";
-      if (modelId.startsWith("cf") && env.AI) provider = "cloudflare";
-      else if (modelId.startsWith("silicon") && siliconKey) provider = "siliconflow";
-      else if (modelId.startsWith("zhipu") && zhipuKey) provider = "zhipu";
-      else if (modelId.startsWith("sambanova") && sambaKey) provider = "sambanova";
-      else if (modelId.startsWith("openrouter") && openrouterKey) provider = "openrouter";
-      else if (modelId.startsWith("groq") && groqKey) provider = "groq";
-      else if (modelId.startsWith("gpt") && openAiKey) provider = "openai";
-      else if (modelId.includes("gemini") && geminiKey) provider = "gemini";
-      // Fallback order if selected model has no key
-      else if (env.AI) provider = "cloudflare";
-      else if (siliconKey) provider = "siliconflow";
-      else if (groqKey) provider = "groq";
-      else if (geminiKey) provider = "gemini";
-      else if (sambaKey) provider = "sambanova";
-      else if (zhipuKey) provider = "zhipu";
-      else if (openrouterKey) provider = "openrouter";
-      else if (openAiKey) provider = "openai";
+      let isFallback = false;
+      let fallbackReason = "";
+
+      if (modelId.startsWith("cf") && env.AI) {
+        provider = "cloudflare";
+      } else if (modelId.startsWith("silicon") && siliconKey) {
+        provider = "siliconflow";
+      } else if (modelId.startsWith("zhipu") && zhipuKey) {
+        provider = "zhipu";
+      } else if (modelId.startsWith("sambanova") && sambaKey) {
+        provider = "sambanova";
+      } else if (modelId.startsWith("openrouter") && openrouterKey) {
+        provider = "openrouter";
+      } else if (modelId.startsWith("groq") && groqKey) {
+        provider = "groq";
+      } else if (modelId.startsWith("gpt") && openAiKey) {
+        provider = "openai";
+      } else if (modelId.includes("gemini") && geminiKey) {
+        provider = "gemini";
+      } else {
+        // Fallback chain
+        isFallback = true;
+        if (env.AI) {
+          provider = "cloudflare";
+          fallbackReason = `所选模型 [${modelId}] 当前未配置 Key，已自动由 Cloudflare Workers AI 极速兜底`;
+        } else if (geminiKey) {
+          provider = "gemini";
+          fallbackReason = `所选模型 [${modelId}] 当前未配置 Key，已由 Google Gemini 兜底`;
+        } else if (groqKey) {
+          provider = "groq";
+          fallbackReason = `所选模型 [${modelId}] 当前未配置 Key，已由 Groq 兜底`;
+        } else if (siliconKey) {
+          provider = "siliconflow";
+          fallbackReason = `所选模型 [${modelId}] 当前未配置 Key，已由硅基流动兜底`;
+        }
+      }
 
       try {
         let translation = "";
@@ -813,7 +929,7 @@ export default {
         } else if (geminiKey) {
           const res = await callGemini(
             geminiKey,
-            [{ role: "user", parts: [{ text }] }],
+            [{ role: "user", parts: [{ text: userContent }] }],
             systemPrompt,
             modelId.includes("pro") ? "gemini-2.5-pro" : "gemini-2.5-flash"
           );
@@ -823,7 +939,15 @@ export default {
           return json({ error: "未检测到可用的 API Key。请访问 /admin 后台配置 Key 或开启 Cloudflare Workers AI", needConfig: true }, 503);
         }
 
-        return json({ code: 0, translation: translation.trim(), provider, modelUsed: usedModel });
+        return json({
+          code: 0,
+          translation: translation.trim(),
+          provider,
+          modelUsed: usedModel,
+          isFallback,
+          requestedModel: modelId,
+          fallbackReason,
+        });
       } catch (err: any) {
         return json({ error: err.message }, 500);
       }
