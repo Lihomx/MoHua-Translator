@@ -6,12 +6,13 @@ import { BottomControls } from './components/BottomControls';
 import { TextInputModal } from './components/TextInputModal';
 import { ModelSelectorModal } from './components/ModelSelectorModal';
 import { FaceToFaceView } from './components/FaceToFaceView';
+import { SaveTranscriptModal } from './components/SaveTranscriptModal';
 import type { TranslationMessage, ModelOption, AsrEngineMode } from './types';
 import { speechRecognitionService } from './services/speechRecognition';
 import { cloudAsrService } from './services/cloudAsrService';
 import { speechSynthesisService } from './services/speechSynthesis';
 import { wakeLockService } from './services/wakeLock';
-import { fetchAvailableModels, translateText } from './services/translationApi';
+import { fetchAvailableModels, translateText, saveSessionToServer, fetchAppSettings } from './services/translationApi';
 import { apiKeyService } from './services/apiKeyService';
 
 const STORAGE_KEY = 'mohua_transcript_history_v1';
@@ -44,13 +45,46 @@ export function App() {
   // Modals state
   const [isModelModalOpen, setIsModelModalOpen] = useState<boolean>(false);
   const [isTextInputModalOpen, setIsTextInputModalOpen] = useState<boolean>(false);
+  const [isSaveModalOpen, setIsSaveModalOpen] = useState<boolean>(false);
   const [isHoldingToTalk, setIsHoldingToTalk] = useState<boolean>(false);
+  const [autoPauseSeconds, setAutoPauseSeconds] = useState<number>(300); // 默认5分钟
+  const [autoPauseNotice, setAutoPauseNotice] = useState<string | null>(null);
 
   // Active references to prevent React stale closures (Fixing Bug B1 & B5)
   const currentModelRef = useRef<ModelOption>(currentModel);
   const messagesRef = useRef<TranslationMessage[]>(messages);
   const asrModeRef = useRef<AsrEngineMode>(asrMode);
   const holdToTalkTranscriptRef = useRef<string>('');
+  const lastActivityTimeRef = useRef<number>(Date.now());
+  const autoPauseSecondsRef = useRef<number>(300);
+  const isListeningRef = useRef<boolean>(isListening);
+
+  useEffect(() => {
+    isListeningRef.current = isListening;
+    if (isListening) {
+      lastActivityTimeRef.current = Date.now();
+    }
+  }, [isListening]);
+
+  useEffect(() => {
+    autoPauseSecondsRef.current = autoPauseSeconds;
+  }, [autoPauseSeconds]);
+
+  // Activity tracker: resets inactivity timer whenever screen is touched, clicked or typed
+  const recordUserActivity = () => {
+    lastActivityTimeRef.current = Date.now();
+  };
+
+  useEffect(() => {
+    window.addEventListener('pointerdown', recordUserActivity);
+    window.addEventListener('touchstart', recordUserActivity);
+    window.addEventListener('keydown', recordUserActivity);
+    return () => {
+      window.removeEventListener('pointerdown', recordUserActivity);
+      window.removeEventListener('touchstart', recordUserActivity);
+      window.removeEventListener('keydown', recordUserActivity);
+    };
+  }, []);
 
   useEffect(() => {
     currentModelRef.current = currentModel;
@@ -95,7 +129,7 @@ export function App() {
       asrModeRef.current = 'cloud-whisper';
     }
 
-    // Fetch live models status
+    // Fetch live models status and app settings
     fetchAvailableModels().then((data) => {
       if (data && data.length > 0) {
         setModels(data);
@@ -108,18 +142,51 @@ export function App() {
         currentModelRef.current = initialModel;
       }
     });
+
+    fetchAppSettings().then((settings) => {
+      if (settings && typeof settings.autoPauseSeconds === 'number') {
+        setAutoPauseSeconds(settings.autoPauseSeconds);
+      }
+    });
+  }, []);
+
+  // Idle Watchdog: Periodically check if continuous listening has been idle without voice or touch
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const limit = autoPauseSecondsRef.current;
+      if (limit > 0 && isListeningRef.current) {
+        const idleDuration = (Date.now() - lastActivityTimeRef.current) / 1000;
+        if (idleDuration >= limit) {
+          stopContinuousListening();
+          const minutes = Math.round(limit / 60);
+          const noticeMsg = limit >= 60 
+            ? `已超过 ${minutes} 分钟未检测到语音及屏幕操作，已自动暂停拾音以节约电量`
+            : `已超过 ${limit} 秒未检测到语音输入，已自动暂停拾音以节约电量`;
+          setAutoPauseNotice(noticeMsg);
+          setTimeout(() => setAutoPauseNotice(null), 6000);
+        }
+      }
+    }, 2000);
+
+    return () => clearInterval(interval);
   }, []);
 
   // 2. Start Continuous Listening Helper according to active ASR mode
   const startContinuousListening = () => {
+    lastActivityTimeRef.current = Date.now();
+    setAutoPauseNotice(null);
     const activeMode = asrModeRef.current;
 
     if (activeMode === 'cloud-whisper') {
       // Cloud Whisper Mode (for PDA or ultra-low volume environments)
       speechRecognitionService.stopContinuousListening();
       cloudAsrService.startContinuous({
-        onInterim: (text) => setInterimText(text),
+        onInterim: (text) => {
+          lastActivityTimeRef.current = Date.now();
+          setInterimText(text);
+        },
         onFinal: (text) => {
+          lastActivityTimeRef.current = Date.now();
           setInterimText('');
           if (!text || text.trim().length === 0) return;
           handleMexicanSpanishFinalUtterance(text.trim());
@@ -131,8 +198,12 @@ export function App() {
       // Local Web Speech API Mode (Ultra-fast, zero-cloud audio bandwidth)
       cloudAsrService.stopContinuous();
       speechRecognitionService.startContinuousListening('es-MX', {
-        onInterim: (text) => setInterimText(text),
+        onInterim: (text) => {
+          lastActivityTimeRef.current = Date.now();
+          setInterimText(text);
+        },
         onFinal: (text) => {
+          lastActivityTimeRef.current = Date.now();
           setInterimText('');
           if (!text || text.trim().length === 0) return;
           handleMexicanSpanishFinalUtterance(text.trim());
@@ -411,6 +482,30 @@ export function App() {
     URL.revokeObjectURL(url);
   };
 
+  // 11. Cloud Session Save Handler
+  const handleSaveSessionToServer = async (title: string, clientName: string): Promise<boolean> => {
+    if (messages.length === 0) {
+      alert('当前暂无可保存的翻译对话记录');
+      return false;
+    }
+
+    const sessionId = `ses_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const result = await saveSessionToServer({
+      id: sessionId,
+      title,
+      clientName,
+      timestamp: Date.now(),
+      messageCount: messages.length,
+      messages,
+    });
+
+    if (!result.ok) {
+      alert(`保存失败: ${result.error || '网络错误'}`);
+      return false;
+    }
+    return true;
+  };
+
   return (
     <div className="flex flex-col h-[100svh] w-full max-w-md mx-auto bg-[#0b0f19] text-gray-100 overflow-hidden relative shadow-2xl">
       {/* First-visit Hero Activation Overlay */}
@@ -420,6 +515,19 @@ export function App() {
           onStartTypingMode={handleStartTypingSession}
           error={startError}
         />
+      )}
+
+      {/* Inactivity Auto-pause Toast Banner */}
+      {autoPauseNotice && (
+        <div className="absolute top-14 left-3 right-3 z-50 p-2.5 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-200 text-xs shadow-lg backdrop-blur-md flex items-center justify-between animate-fadeIn">
+          <span>⏱️ {autoPauseNotice}</span>
+          <button
+            onClick={() => setAutoPauseNotice(null)}
+            className="text-amber-400 hover:text-white text-xs ml-2 px-1 font-bold"
+          >
+            ✕
+          </button>
+        </div>
       )}
 
       {/* Face-to-Face Dual-Screen Split View */}
@@ -445,6 +553,7 @@ export function App() {
         onToggleAsrMode={handleToggleAsrMode}
         onOpenFaceToFace={() => setIsFaceToFaceActive(true)}
         onExportSession={handleExportSession}
+        onSaveSession={() => setIsSaveModalOpen(true)}
       />
 
       {/* Live Transcript Waterfall */}
@@ -483,6 +592,14 @@ export function App() {
           currentModelRef.current = model;
           apiKeyService.setActiveModelId(model.id);
         }}
+      />
+
+      {/* Modal: Save Transcript to Cloud & Admin */}
+      <SaveTranscriptModal
+        isOpen={isSaveModalOpen}
+        onClose={() => setIsSaveModalOpen(false)}
+        messageCount={messages.length}
+        onSave={handleSaveSessionToServer}
       />
     </div>
   );

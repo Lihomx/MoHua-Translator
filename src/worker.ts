@@ -11,6 +11,7 @@ export interface Env {
   SAMBANOVA_API_KEY?: string;
   OPENROUTER_API_KEY?: string;
   AI?: any; // Cloudflare Workers AI binding
+  MOHUA_KV?: KVNamespace; // Cloudflare KV for storing client transcripts & system settings
   ADMIN_USERNAME?: string;  // default: admin
   ADMIN_PASSWORD?: string;  // default: mohua2024
   ASSETS?: { fetch: (request: Request) => Promise<Response> };
@@ -66,23 +67,31 @@ function buildAdminHTML(env: Env): string {
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro',sans-serif;background:#0b0f19;color:#f3f4f6;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
-  .card{background:#111827;border:1px solid #1f2937;border-radius:20px;padding:28px;width:100%;max-width:540px;box-shadow:0 25px 50px rgba(0,0,0,0.5)}
-  .logo{display:flex;align-items:center;gap:10px;margin-bottom:24px}
+  .card{background:#111827;border:1px solid #1f2937;border-radius:20px;padding:24px;width:100%;max-width:680px;box-shadow:0 25px 50px rgba(0,0,0,0.5)}
+  .logo{display:flex;align-items:center;gap:10px;margin-bottom:18px}
   .logo-icon{width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#10b981,#06b6d4);display:flex;align-items:center;justify-content:center;font-weight:900;color:#fff;font-size:16px}
   h1{font-size:18px;font-weight:700;color:#fff}
   h1 span{font-size:13px;font-weight:400;color:#6b7280;display:block;margin-top:2px}
-  .section{margin-bottom:16px;background:#0d1322;border:1px solid #1f293d;border-radius:14px;padding:14px}
+  
+  /* Tabs */
+  .tabs{display:flex;gap:6px;background:#0d1322;padding:4px;border-radius:12px;margin-bottom:18px;border:1px solid #1f293d}
+  .tab-btn{flex:1;padding:8px 10px;background:transparent;border:none;border-radius:8px;color:#9ca3af;font-size:12px;font-weight:600;cursor:pointer;transition:.15s}
+  .tab-btn.active{background:#1f293d;color:#10b981;box-shadow:0 2px 4px rgba(0,0,0,0.2)}
+  .tab-content{display:none}
+  .tab-content.active{display:block}
+
+  .section{margin-bottom:14px;background:#0d1322;border:1px solid #1f293d;border-radius:14px;padding:14px}
   .section-title{font-size:12px;font-weight:700;letter-spacing:.04em;color:#10b981;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between}
   .field{margin-bottom:6px}
   label{display:block;font-size:11px;color:#9ca3af;margin-bottom:4px}
-  input{width:100%;background:#0b0f19;border:1px solid #374151;border-radius:8px;padding:8px 10px;color:#f3f4f6;font-size:12px;font-family:monospace;outline:none;transition:.2s}
-  input:focus{border-color:#10b981;box-shadow:0 0 0 3px rgba(16,185,129,.15)}
+  input, select{width:100%;background:#0b0f19;border:1px solid #374151;border-radius:8px;padding:8px 10px;color:#f3f4f6;font-size:12px;outline:none;transition:.2s}
+  input:focus, select:focus{border-color:#10b981;box-shadow:0 0 0 3px rgba(16,185,129,.15)}
   .status{display:inline-flex;align-items:center;gap:4px;font-size:10px;padding:2px 7px;border-radius:20px;font-weight:600}
   .status.ok{background:rgba(16,185,129,.1);color:#10b981;border:1px solid rgba(16,185,129,.3)}
   .status.missing{background:rgba(239,68,68,.1);color:#f87171;border:1px solid rgba(239,68,68,.2)}
   .status.native{background:rgba(59,130,246,.1);color:#60a5fa;border:1px solid rgba(59,130,246,.3)}
   .label-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
-  .btn{width:100%;padding:12px;border-radius:12px;border:none;background:linear-gradient(135deg,#10b981,#06b6d4);color:#fff;font-weight:700;font-size:14px;cursor:pointer;transition:.15s;margin-top:4px}
+  .btn{width:100%;padding:10px 14px;border-radius:10px;border:none;background:linear-gradient(135deg,#10b981,#06b6d4);color:#fff;font-weight:700;font-size:13px;cursor:pointer;transition:.15s;margin-top:4px}
   .btn:hover{opacity:.9;transform:translateY(-1px)}
   .btn:active{transform:scale(.98)}
   .btn.secondary{background:#1f2937;border:1px solid #374151;color:#d1d5db;margin-top:8px}
@@ -90,13 +99,27 @@ function buildAdminHTML(env: Env): string {
   .msg{padding:10px 14px;border-radius:10px;font-size:13px;margin-bottom:16px;display:none}
   .msg.ok{background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.3);color:#10b981}
   .msg.err{background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);color:#f87171}
-  .divider{border:none;border-top:1px solid #1f2937;margin:20px 0}
+  .divider{border:none;border-top:1px solid #1f2937;margin:16px 0}
   .login-wrap{display:none}
   .admin-wrap{display:none}
   .info-box{background:#0b0f19;border:1px solid #1f2937;border-radius:12px;padding:12px 14px;font-size:12px;color:#6b7280;line-height:1.6;margin-top:16px}
   .info-box strong{color:#9ca3af}
   .test-btn{float:right;background:#1f2937;border:1px solid #374151;color:#9ca3af;border-radius:6px;padding:3px 8px;font-size:10px;cursor:pointer}
   .test-btn:hover{color:#10b981;border-color:#10b981}
+  
+  /* Sessions Table */
+  .session-table{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px}
+  .session-table th{background:#0b0f19;padding:8px 10px;text-align:left;color:#9ca3af;border-bottom:1px solid #1f293d;font-weight:600}
+  .session-table td{padding:10px;border-bottom:1px solid #1f2937;color:#e5e7eb}
+  .session-table tr:hover td{background:rgba(16,185,129,0.04)}
+  .tag{padding:2px 6px;border-radius:4px;background:#1f2937;font-size:11px;color:#38bdf8}
+  .action-btn{background:#1f2937;border:1px solid #374151;color:#9ca3af;border-radius:6px;padding:3px 7px;font-size:11px;cursor:pointer;margin-right:4px}
+  .action-btn:hover{color:#10b981;border-color:#10b981}
+  .action-btn.del:hover{color:#ef4444;border-color:#ef4444}
+
+  /* Modal */
+  .modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.75);backdrop-filter:blur(3px);display:none;align-items:center;justify-content:center;z-index:99;padding:16px}
+  .modal-box{background:#111827;border:1px solid #374151;border-radius:16px;max-width:560px;width:100%;max-height:85vh;overflow-y:auto;padding:20px;box-shadow:0 20px 40px rgba(0,0,0,0.6)}
 </style>
 </head>
 <body>
@@ -131,149 +154,245 @@ function buildAdminHTML(env: Env): string {
 
   <!-- Admin Panel -->
   <div class="admin-wrap" id="admin-wrap">
-    <div id="page-subtitle-2" style="font-size:11px;color:#6b7280;margin-bottom:16px">
-      已登录 · 支持 8 大模型引擎 · 永久免费与自备 Key 随心调配
+    <!-- Top Navigation Tabs -->
+    <div class="tabs">
+      <button class="tab-btn active" onclick="switchTab('keys')">⚙️ 大模型 & Key 配置</button>
+      <button class="tab-btn" onclick="switchTab('sessions')">📁 客户端会话记录</button>
+      <button class="tab-btn" onclick="switchTab('settings')">⏱️ 自动暂停与同传设置</button>
     </div>
 
-    <!-- 0. Cloudflare Workers AI -->
-    <div class="section">
-      <div class="section-title">
-        <span>🤖 Cloudflare Workers AI</span>
-        <button class="test-btn" onclick="testKey('cf-ai')">测试连通</button>
+    <!-- TAB 1: API Keys Config -->
+    <div id="tab-keys" class="tab-content active">
+      <div id="page-subtitle-2" style="font-size:11px;color:#6b7280;margin-bottom:12px">
+        支持 8 大模型引擎 · 永久免费与自备 Key 随心调配
       </div>
-      <div class="label-row">
-        <label>系统原生 Llama-3.1 8B（每日 10,000 次免费推理）</label>
-        <span class="status native">${hasCfAi ? '✓ 内置已启用' : '✓ 原生就绪'}</span>
-      </div>
-      <p style="font-size:11px;color:#6b7280;margin-top:2px">免 Key 零配置 · 边缘节点超低延迟 ~180ms，开箱即用保底</p>
-    </div>
 
-    <!-- 1. SiliconFlow -->
-    <div class="section">
-      <div class="section-title">
-        <span>🇨🇳 硅基流动 SiliconFlow（Qwen 2.5 永久免费）</span>
-        <button class="test-btn" onclick="testKey('siliconflow')">测试连通</button>
-      </div>
-      <div class="field">
-        <div class="label-row">
-          <label>SILICONFLOW_API_KEY (推荐模型: Qwen/Qwen2.5-7B-Instruct)</label>
-          <span class="status ${hasSilicon ? 'ok' : 'missing'}">${hasSilicon ? '✓ 已配置' : '○ 未配置'}</span>
+      <!-- 0. Cloudflare Workers AI -->
+      <div class="section">
+        <div class="section-title">
+          <span>🤖 Cloudflare Workers AI</span>
+          <button class="test-btn" onclick="testKey('cf-ai')">测试连通</button>
         </div>
-        <input id="siliconflow" type="password" placeholder="sk-..." ${hasSilicon ? 'value="[已在环境变量配置]"' : ''}>
-      </div>
-    </div>
-
-    <!-- 2. Groq -->
-    <div class="section">
-      <div class="section-title">
-        <span>⚡ Groq API Key（超极速 ~100ms）</span>
-        <button class="test-btn" onclick="testKey('groq')">测试连通</button>
-      </div>
-      <div class="field">
         <div class="label-row">
-          <label>GROQ_API_KEY (默认: llama-3.1-8b-instant)</label>
-          <span class="status ${hasGroq ? 'ok' : 'missing'}">${hasGroq ? '✓ 已配置' : '○ 未配置'}</span>
+          <label>系统原生 Llama-3.1 8B（每日 10,000 次免费推理）</label>
+          <span class="status native">${hasCfAi ? '✓ 内置已启用' : '✓ 原生就绪'}</span>
         </div>
-        <input id="groq" type="password" placeholder="gsk_..." ${hasGroq ? 'value="[已在环境变量配置]"' : ''}>
+        <p style="font-size:11px;color:#6b7280;margin-top:2px">免 Key 零配置 · 边缘节点超低延迟 ~180ms，开箱即用保底</p>
+      </div>
+
+      <!-- 1. SiliconFlow -->
+      <div class="section">
+        <div class="section-title">
+          <span>🇨🇳 硅基流动 SiliconFlow（Qwen 2.5 永久免费）</span>
+          <button class="test-btn" onclick="testKey('siliconflow')">测试连通</button>
+        </div>
+        <div class="field">
+          <div class="label-row">
+            <label>SILICONFLOW_API_KEY (推荐模型: Qwen/Qwen2.5-7B-Instruct)</label>
+            <span class="status ${hasSilicon ? 'ok' : 'missing'}">${hasSilicon ? '✓ 已配置' : '○ 未配置'}</span>
+          </div>
+          <input id="siliconflow" type="password" placeholder="sk-..." ${hasSilicon ? 'value="[已在环境变量配置]"' : ''}>
+        </div>
+      </div>
+
+      <!-- 2. Groq -->
+      <div class="section">
+        <div class="section-title">
+          <span>⚡ Groq API Key（超极速 ~100ms）</span>
+          <button class="test-btn" onclick="testKey('groq')">测试连通</button>
+        </div>
+        <div class="field">
+          <div class="label-row">
+            <label>GROQ_API_KEY (默认: llama-3.1-8b-instant)</label>
+            <span class="status ${hasGroq ? 'ok' : 'missing'}">${hasGroq ? '✓ 已配置' : '○ 未配置'}</span>
+          </div>
+          <input id="groq" type="password" placeholder="gsk_..." ${hasGroq ? 'value="[已在环境变量配置]"' : ''}>
+        </div>
+      </div>
+
+      <!-- 3. SambaNova -->
+      <div class="section">
+        <div class="section-title">
+          <span>🚀 SambaNova Cloud（超算级极速免费）</span>
+          <button class="test-btn" onclick="testKey('sambanova')">测试连通</button>
+        </div>
+        <div class="field">
+          <div class="label-row">
+            <label>SAMBANOVA_API_KEY (Meta-Llama-3.1-8B-Instruct)</label>
+            <span class="status ${hasSambaNova ? 'ok' : 'missing'}">${hasSambaNova ? '✓ 已配置' : '○ 未配置'}</span>
+          </div>
+          <input id="sambanova" type="password" placeholder="••••••••" ${hasSambaNova ? 'value="[已在环境变量配置]"' : ''}>
+        </div>
+      </div>
+
+      <!-- 4. Zhipu AI -->
+      <div class="section">
+        <div class="section-title">
+          <span>🌟 智谱 AI（GLM-4-Flash 永久免费）</span>
+          <button class="test-btn" onclick="testKey('zhipu')">测试连通</button>
+        </div>
+        <div class="field">
+          <div class="label-row">
+            <label>ZHIPU_API_KEY (模型: glm-4-flash)</label>
+            <span class="status ${hasZhipu ? 'ok' : 'missing'}">${hasZhipu ? '✓ 已配置' : '○ 未配置'}</span>
+          </div>
+          <input id="zhipu" type="password" placeholder="••••••••" ${hasZhipu ? 'value="[已在环境变量配置]"' : ''}>
+        </div>
+      </div>
+
+      <!-- 5. OpenRouter -->
+      <div class="section">
+        <div class="section-title">
+          <span>🌐 OpenRouter（全球免费模型聚合）</span>
+          <button class="test-btn" onclick="testKey('openrouter')">测试连通</button>
+        </div>
+        <div class="field">
+          <div class="label-row">
+            <label>OPENROUTER_API_KEY (llama-3.1-8b:free)</label>
+            <span class="status ${hasOpenRouter ? 'ok' : 'missing'}">${hasOpenRouter ? '✓ 已配置' : '○ 未配置'}</span>
+          </div>
+          <input id="openrouter" type="password" placeholder="sk-or-..." ${hasOpenRouter ? 'value="[已在环境变量配置]"' : ''}>
+        </div>
+      </div>
+
+      <!-- 6. Google Gemini -->
+      <div class="section">
+        <div class="section-title">
+          <span>🌟 Google Gemini API Key</span>
+          <button class="test-btn" onclick="testKey('gemini')">测试连通</button>
+        </div>
+        <div class="field">
+          <div class="label-row">
+            <label>GEMINI_API_KEY (gemini-2.5-flash / gemini-2.5-pro)</label>
+            <span class="status ${hasGemini ? 'ok' : 'missing'}">${hasGemini ? '✓ 已配置' : '○ 未配置'}</span>
+          </div>
+          <input id="gemini" type="password" placeholder="AIzaSy..." ${hasGemini ? 'value="[已在环境变量配置]"' : ''}>
+        </div>
+      </div>
+
+      <!-- 7. OpenAI -->
+      <div class="section">
+        <div class="section-title">
+          <span>💎 OpenAI API Key</span>
+          <button class="test-btn" onclick="testKey('openai')">测试连通</button>
+        </div>
+        <div class="field">
+          <div class="label-row">
+            <label>OPENAI_API_KEY (gpt-4o-mini)</label>
+            <span class="status ${hasOpenAI ? 'ok' : 'missing'}">${hasOpenAI ? '✓ 已配置' : '○ 未配置'}</span>
+          </div>
+          <input id="openai" type="password" placeholder="sk-..." ${hasOpenAI ? 'value="[已在环境变量配置]"' : ''}>
+        </div>
+      </div>
+
+      <div id="test-result" style="display:none;padding:10px 14px;border-radius:10px;font-size:12px;margin-bottom:12px"></div>
+
+      <hr class="divider">
+
+      <div class="section" style="background:transparent;border:none;padding:0">
+        <div class="section-title">💾 保存 API Key（本地浏览器）</div>
+        <p style="font-size:12px;color:#6b7280;margin-bottom:12px;line-height:1.6">
+          填写下方 API Key 后点击保存，将安全存储在浏览器 localStorage 中。
+          在 Cloudflare 后台设置环境变量可实现全站免填服务端托管。
+        </p>
+        <button class="btn" onclick="saveKeys()">💾 保存 Key 到本地浏览器</button>
+        <button class="btn secondary" onclick="clearKeys()">🗑 清空本地保存的 Key</button>
       </div>
     </div>
 
-    <!-- 3. SambaNova -->
-    <div class="section">
-      <div class="section-title">
-        <span>🚀 SambaNova Cloud（超算级极速免费）</span>
-        <button class="test-btn" onclick="testKey('sambanova')">测试连通</button>
+    <!-- TAB 2: Client Session History -->
+    <div id="tab-sessions" class="tab-content">
+      <div class="section-title" style="margin-bottom:12px">
+        <span>📁 客户端上传的会话记录</span>
+        <button class="test-btn" onclick="loadSessions()">🔄 刷新列表</button>
       </div>
-      <div class="field">
-        <div class="label-row">
-          <label>SAMBANOVA_API_KEY (Meta-Llama-3.1-8B-Instruct)</label>
-          <span class="status ${hasSambaNova ? 'ok' : 'missing'}">${hasSambaNova ? '✓ 已配置' : '○ 未配置'}</span>
-        </div>
-        <input id="sambanova" type="password" placeholder="••••••••" ${hasSambaNova ? 'value="[已在环境变量配置]"' : ''}>
-      </div>
-    </div>
-
-    <!-- 4. Zhipu AI -->
-    <div class="section">
-      <div class="section-title">
-        <span>🌟 智谱 AI（GLM-4-Flash 永久免费）</span>
-        <button class="test-btn" onclick="testKey('zhipu')">测试连通</button>
-      </div>
-      <div class="field">
-        <div class="label-row">
-          <label>ZHIPU_API_KEY (模型: glm-4-flash)</label>
-          <span class="status ${hasZhipu ? 'ok' : 'missing'}">${hasZhipu ? '✓ 已配置' : '○ 未配置'}</span>
-        </div>
-        <input id="zhipu" type="password" placeholder="••••••••" ${hasZhipu ? 'value="[已在环境变量配置]"' : ''}>
-      </div>
-    </div>
-
-    <!-- 5. OpenRouter -->
-    <div class="section">
-      <div class="section-title">
-        <span>🌐 OpenRouter（全球免费模型聚合）</span>
-        <button class="test-btn" onclick="testKey('openrouter')">测试连通</button>
-      </div>
-      <div class="field">
-        <div class="label-row">
-          <label>OPENROUTER_API_KEY (llama-3.1-8b:free)</label>
-          <span class="status ${hasOpenRouter ? 'ok' : 'missing'}">${hasOpenRouter ? '✓ 已配置' : '○ 未配置'}</span>
-        </div>
-        <input id="openrouter" type="password" placeholder="sk-or-..." ${hasOpenRouter ? 'value="[已在环境变量配置]"' : ''}>
-      </div>
-    </div>
-
-    <!-- 6. Google Gemini -->
-    <div class="section">
-      <div class="section-title">
-        <span>🌟 Google Gemini API Key</span>
-        <button class="test-btn" onclick="testKey('gemini')">测试连通</button>
-      </div>
-      <div class="field">
-        <div class="label-row">
-          <label>GEMINI_API_KEY (gemini-2.5-flash / gemini-2.5-pro)</label>
-          <span class="status ${hasGemini ? 'ok' : 'missing'}">${hasGemini ? '✓ 已配置' : '○ 未配置'}</span>
-        </div>
-        <input id="gemini" type="password" placeholder="AIzaSy..." ${hasGemini ? 'value="[已在环境变量配置]"' : ''}>
-      </div>
-    </div>
-
-    <!-- 7. OpenAI -->
-    <div class="section">
-      <div class="section-title">
-        <span>💎 OpenAI API Key</span>
-        <button class="test-btn" onclick="testKey('openai')">测试连通</button>
-      </div>
-      <div class="field">
-        <div class="label-row">
-          <label>OPENAI_API_KEY (gpt-4o-mini)</label>
-          <span class="status ${hasOpenAI ? 'ok' : 'missing'}">${hasOpenAI ? '✓ 已配置' : '○ 未配置'}</span>
-        </div>
-        <input id="openai" type="password" placeholder="sk-..." ${hasOpenAI ? 'value="[已在环境变量配置]"' : ''}>
-      </div>
-    </div>
-
-    <div id="test-result" style="display:none;padding:10px 14px;border-radius:10px;font-size:12px;margin-bottom:12px"></div>
-
-    <hr class="divider">
-
-    <div class="section" style="background:transparent;border:none;padding:0">
-      <div class="section-title">💾 保存 API Key（本地浏览器）</div>
-      <p style="font-size:12px;color:#6b7280;margin-bottom:12px;line-height:1.6">
-        填写下方 API Key 后点击保存，将安全存储在浏览器 localStorage 中。
-        在 Cloudflare 后台设置环境变量可实现全站免填服务端托管。
+      <p style="font-size:11px;color:#6b7280;margin-bottom:12px">
+        客户端点击上方书签按钮命名保存的翻译记录，将统一汇总在此处，支持检索、查看详细双语流及一键导出。
       </p>
-      <button class="btn" onclick="saveKeys()">💾 保存 Key 到本地浏览器</button>
-      <button class="btn secondary" onclick="clearKeys()">🗑 清空本地保存的 Key</button>
+      <div style="overflow-x:auto">
+        <table class="session-table">
+          <thead>
+            <tr>
+              <th>时间</th>
+              <th>记录命名</th>
+              <th>客户端/标签</th>
+              <th>句数</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="sessions-tbody">
+            <tr><td colspan="5" style="text-align:center;color:#6b7280;padding:24px">正在加载记录...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- TAB 3: Auto Pause & System Settings -->
+    <div id="tab-settings" class="tab-content">
+      <div class="section">
+        <div class="section-title">⏱️ 空闲无语音自动暂停设置</div>
+        <p style="font-size:11px;color:#6b7280;margin-bottom:12px;line-height:1.6">
+          当开启同传后，如果长时间未检测到说话声音，且屏幕没有被触摸或点击，系统将自动暂停麦克风拾音，以节约手机/PDA电量及网络流量。
+        </p>
+        <div class="field">
+          <label>空闲自动暂停超时时间：</label>
+          <select id="auto-pause-select">
+            <option value="60">1 分钟无语音/无操作自动暂停</option>
+            <option value="180">3 分钟无语音/无操作自动暂停</option>
+            <option value="300" selected>5 分钟无语音/无操作自动暂停 (推荐)</option>
+            <option value="600">10 分钟无语音/无操作自动暂停</option>
+            <option value="0">从不自动暂停 (保持常开)</option>
+          </select>
+        </div>
+        <button class="btn" onclick="saveSettings()" style="margin-top:14px">💾 保存自动暂停配置</button>
+      </div>
     </div>
 
     <button class="btn secondary" onclick="logout()" style="margin-top:16px">退出登录</button>
   </div>
 </div>
 
+<!-- Session Detail Modal -->
+<div class="modal-overlay" id="session-modal" onclick="closeSessionModal(event)">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;border-bottom:1px solid #1f2937;padding-bottom:10px">
+      <div>
+        <h3 id="modal-title" style="font-size:14px;font-weight:700;color:#fff">会话详情</h3>
+        <p id="modal-sub" style="font-size:11px;color:#9ca3af;margin-top:2px"></p>
+      </div>
+      <button class="action-btn" onclick="document.getElementById('session-modal').style.display='none'">✕ 关闭</button>
+    </div>
+    <div id="modal-messages" style="display:flex;flex-direction:column;gap:10px;font-size:12px;max-height:55vh;overflow-y:auto;padding-right:4px">
+    </div>
+    <div style="display:flex;gap:8px;margin-top:16px;border-top:1px solid #1f2937;padding-top:12px">
+      <button class="btn" id="modal-export-btn" style="margin:0">📥 导出 TXT 记录</button>
+      <button class="btn secondary" onclick="document.getElementById('session-modal').style.display='none'" style="margin:0">关闭</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const TOKEN_KEY = 'mohua_admin_token';
 const KEYS_KEY = 'mohua_custom_api_keys';
+let currentActiveSession = null;
+
+function switchTab(tab) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+  
+  if (tab === 'keys') {
+    document.querySelectorAll('.tab-btn')[0].classList.add('active');
+    document.getElementById('tab-keys').classList.add('active');
+  } else if (tab === 'sessions') {
+    document.querySelectorAll('.tab-btn')[1].classList.add('active');
+    document.getElementById('tab-sessions').classList.add('active');
+    loadSessions();
+  } else if (tab === 'settings') {
+    document.querySelectorAll('.tab-btn')[2].classList.add('active');
+    document.getElementById('tab-settings').classList.add('active');
+    loadSettings();
+  }
+}
 
 function showMsg(text, type='ok') {
   const el = document.getElementById('msg');
@@ -311,6 +430,7 @@ async function doLogin() {
       document.getElementById('admin-wrap').style.display = 'block';
       document.getElementById('page-subtitle').textContent = '管理后台 · 已登录';
       loadSavedKeys();
+      loadSettings();
     } else {
       showMsg('账号或密码错误', 'err');
     }
@@ -392,6 +512,151 @@ async function testKey(provider) {
   }
 }
 
+async function loadSessions() {
+  const token = localStorage.getItem(TOKEN_KEY) || '';
+  const tbody = document.getElementById('sessions-tbody');
+  tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#6b7280;padding:20px">正在获取最新记录...</td></tr>';
+  
+  try {
+    const res = await fetch('/admin/api/sessions', {
+      headers: { 'X-Admin-Token': token }
+    });
+    const data = await res.json();
+    if (!data.ok || !data.sessions || data.sessions.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#6b7280;padding:24px">暂无客户端上传的历史记录</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = data.sessions.map(s => {
+      const dateStr = new Date(s.timestamp).toLocaleString();
+      return '<tr>' +
+        '<td style="font-size:11px;color:#9ca3af;white-space:nowrap">' + dateStr + '</td>' +
+        '<td style="font-weight:600;color:#fff">' + escapeHtml(s.title || '未命名') + '</td>' +
+        '<td><span class="tag">' + escapeHtml(s.clientName || '通用') + '</span></td>' +
+        '<td style="color:#10b981;font-weight:600">' + (s.messageCount || 0) + '</td>' +
+        '<td style="white-space:nowrap">' +
+          '<button class="action-btn" onclick="viewSession(\'' + s.id + '\')">查看</button>' +
+          '<button class="action-btn del" onclick="deleteSession(\'' + s.id + '\')">删除</button>' +
+        '</td>' +
+      '</tr>';
+    }).join('');
+  } catch(e) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#f87171;padding:20px">加载失败：' + e.message + '</td></tr>';
+  }
+}
+
+async function viewSession(id) {
+  const token = localStorage.getItem(TOKEN_KEY) || '';
+  try {
+    const res = await fetch('/admin/api/sessions/' + id, {
+      headers: { 'X-Admin-Token': token }
+    });
+    const session = await res.json();
+    currentActiveSession = session;
+    
+    document.getElementById('modal-title').textContent = session.title || '会话详情';
+    document.getElementById('modal-sub').textContent = '来源: ' + (session.clientName || '通用') + ' · 时间: ' + new Date(session.timestamp).toLocaleString();
+    
+    const container = document.getElementById('modal-messages');
+    const msgs = session.messages || [];
+    if (msgs.length === 0) {
+      container.innerHTML = '<div style="color:#6b7280;text-align:center;padding:20px">该记录中暂无对话内容</div>';
+    } else {
+      container.innerHTML = msgs.map(m => {
+        const isEs = m.direction === 'es-to-zh';
+        const speakerColor = isEs ? '#38bdf8' : '#34d399';
+        const speakerName = isEs ? '🇲🇽 墨西哥西语' : '🇨🇳 中文发言';
+        return '<div style="background:#0d1322;border:1px solid #1f2937;border-radius:10px;padding:10px">' +
+          '<div style="font-size:10px;color:' + speakerColor + ';margin-bottom:4px;font-weight:600">' + speakerName + '</div>' +
+          '<div style="color:#f3f4f6;margin-bottom:4px">' + escapeHtml(m.sourceText) + '</div>' +
+          '<div style="color:#10b981;font-size:11px">译: ' + escapeHtml(m.translatedText || '') + '</div>' +
+        '</div>';
+      }).join('');
+    }
+    
+    document.getElementById('modal-export-btn').onclick = () => exportCurrentSessionTxt();
+    document.getElementById('session-modal').style.display = 'flex';
+  } catch(e) {
+    alert('获取详情失败: ' + e.message);
+  }
+}
+
+function exportCurrentSessionTxt() {
+  if (!currentActiveSession) return;
+  const msgs = currentActiveSession.messages || [];
+  const lines = msgs.map(m => {
+    const speaker = m.direction === 'es-to-zh' ? '🇲🇽 墨西哥西语' : '🇨🇳 中文发言';
+    return '[' + new Date(m.timestamp).toLocaleTimeString() + '] ' + speaker + '\n原文: ' + m.sourceText + '\n译文: ' + (m.translatedText || '') + '\n';
+  });
+  const content = 'MoHua 墨华同传 - 对话会话记录\n标题: ' + currentActiveSession.title + '\n客户端: ' + currentActiveSession.clientName + '\n时间: ' + new Date(currentActiveSession.timestamp).toLocaleString() + '\n\n' + lines.join('\n');
+  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = (currentActiveSession.title || 'MoHua_记录') + '.txt';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function deleteSession(id) {
+  if (!confirm('确认删除该记录？删除后不可恢复。')) return;
+  const token = localStorage.getItem(TOKEN_KEY) || '';
+  try {
+    const res = await fetch('/admin/api/sessions/' + id, {
+      method: 'DELETE',
+      headers: { 'X-Admin-Token': token }
+    });
+    const d = await res.json();
+    if (d.ok) {
+      showMsg('已删除会话记录', 'ok');
+      loadSessions();
+    }
+  } catch(e) {
+    alert('删除失败: ' + e.message);
+  }
+}
+
+function closeSessionModal(e) {
+  if (e.target.id === 'session-modal') {
+    document.getElementById('session-modal').style.display = 'none';
+  }
+}
+
+async function loadSettings() {
+  try {
+    const res = await fetch('/api/settings');
+    const data = await res.json();
+    if (data.ok && data.autoPauseSeconds !== undefined) {
+      document.getElementById('auto-pause-select').value = String(data.autoPauseSeconds);
+    }
+  } catch(e) {}
+}
+
+async function saveSettings() {
+  const token = localStorage.getItem(TOKEN_KEY) || '';
+  const seconds = Number(document.getElementById('auto-pause-select').value) || 0;
+  try {
+    const res = await fetch('/admin/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Admin-Token': token },
+      body: JSON.stringify({ autoPauseSeconds: seconds })
+    });
+    const d = await res.json();
+    if (d.ok) {
+      showMsg('✅ 自动暂停设置已成功保存！所有客户端即刻生效', 'ok');
+    } else {
+      showMsg('保存失败: ' + d.error, 'err');
+    }
+  } catch(e) {
+    showMsg('网络错误: ' + e.message, 'err');
+  }
+}
+
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
 function logout() {
   localStorage.removeItem(TOKEN_KEY);
   document.getElementById('admin-wrap').style.display = 'none';
@@ -411,6 +676,7 @@ window.addEventListener('DOMContentLoaded', () => {
           document.getElementById('admin-wrap').style.display = 'block';
           document.getElementById('page-subtitle').textContent = '管理后台 · 已登录';
           loadSavedKeys();
+          loadSettings();
         }
       }).catch(() => {});
   }
@@ -744,6 +1010,147 @@ export default {
       const body: any = await request.json().catch(() => ({}));
       const result = await runKeyTest(body.provider, body.apiKey, env);
       return json(result);
+    }
+
+    // ===== ADMIN SESSIONS & SETTINGS ROUTES =====
+    if (path === "/admin/api/sessions" && request.method === "GET") {
+      const token = request.headers.get("X-Admin-Token") || "";
+      const expectedUser = env.ADMIN_USERNAME || "admin";
+      const expectedPass = env.ADMIN_PASSWORD || "mohua2024";
+      if (token !== makeToken(expectedUser, expectedPass)) {
+        return json({ ok: false, error: "Unauthorized" }, 401);
+      }
+
+      if (!env.MOHUA_KV) {
+        return json({ ok: true, sessions: [], note: "KV namespace not bound" });
+      }
+
+      try {
+        const listRes = await env.MOHUA_KV.list({ prefix: "session:" });
+        const sessions: any[] = [];
+        for (const key of listRes.keys) {
+          const raw = await env.MOHUA_KV.get(key.name);
+          if (raw) {
+            try {
+              const item = JSON.parse(raw);
+              sessions.push({
+                id: item.id,
+                title: item.title,
+                clientName: item.clientName,
+                timestamp: item.timestamp,
+                messageCount: item.messageCount || (item.messages ? item.messages.length : 0),
+                key: key.name,
+              });
+            } catch (e) {}
+          }
+        }
+        sessions.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+        return json({ ok: true, sessions });
+      } catch (err: any) {
+        return json({ ok: false, error: err.message }, 500);
+      }
+    }
+
+    if (path.startsWith("/admin/api/sessions/") && request.method === "GET") {
+      const token = request.headers.get("X-Admin-Token") || "";
+      const expectedUser = env.ADMIN_USERNAME || "admin";
+      const expectedPass = env.ADMIN_PASSWORD || "mohua2024";
+      if (token !== makeToken(expectedUser, expectedPass)) {
+        return json({ ok: false, error: "Unauthorized" }, 401);
+      }
+
+      const sessionId = path.replace("/admin/api/sessions/", "");
+      if (!env.MOHUA_KV) {
+        return json({ ok: false, error: "KV not bound" }, 400);
+      }
+
+      const listRes = await env.MOHUA_KV.list({ prefix: `session:` });
+      const targetKey = listRes.keys.find((k) => k.name.endsWith(`:${sessionId}`) || k.name === `session:${sessionId}`);
+      if (!targetKey) {
+        return json({ ok: false, error: "记录未找到" }, 404);
+      }
+
+      const sessionRaw = await env.MOHUA_KV.get(targetKey.name);
+      return new Response(sessionRaw || "{}", { headers: { "Content-Type": "application/json" } });
+    }
+
+    if (path.startsWith("/admin/api/sessions/") && request.method === "DELETE") {
+      const token = request.headers.get("X-Admin-Token") || "";
+      const expectedUser = env.ADMIN_USERNAME || "admin";
+      const expectedPass = env.ADMIN_PASSWORD || "mohua2024";
+      if (token !== makeToken(expectedUser, expectedPass)) {
+        return json({ ok: false, error: "Unauthorized" }, 401);
+      }
+
+      const sessionId = path.replace("/admin/api/sessions/", "");
+      if (env.MOHUA_KV) {
+        const listRes = await env.MOHUA_KV.list({ prefix: `session:` });
+        const targetKeys = listRes.keys.filter((k) => k.name.endsWith(`:${sessionId}`) || k.name === `session:${sessionId}`);
+        for (const k of targetKeys) {
+          await env.MOHUA_KV.delete(k.name);
+        }
+      }
+      return json({ ok: true });
+    }
+
+    // Save or update system settings (e.g. idle autoPauseSeconds)
+    if (path === "/admin/api/settings" && request.method === "POST") {
+      const token = request.headers.get("X-Admin-Token") || "";
+      const expectedUser = env.ADMIN_USERNAME || "admin";
+      const expectedPass = env.ADMIN_PASSWORD || "mohua2024";
+      if (token !== makeToken(expectedUser, expectedPass)) {
+        return json({ ok: false, error: "Unauthorized" }, 401);
+      }
+
+      const body: any = await request.json().catch(() => ({}));
+      const autoPauseSeconds = Number(body.autoPauseSeconds) || 0;
+      if (env.MOHUA_KV) {
+        await env.MOHUA_KV.put("setting:autoPauseSeconds", String(autoPauseSeconds));
+      }
+      return json({ ok: true, autoPauseSeconds });
+    }
+
+    // Public API: Client submits a named translation session
+    if (path === "/api/sessions" && request.method === "POST") {
+      try {
+        const body: any = await request.json().catch(() => null);
+        if (!body || !body.id) {
+          return json({ ok: false, error: "Invalid session payload" }, 400);
+        }
+
+        const sessionRecord = {
+          id: String(body.id),
+          title: String(body.title || "未命名会话"),
+          clientName: String(body.clientName || "通用访客"),
+          timestamp: Number(body.timestamp) || Date.now(),
+          messageCount: Array.isArray(body.messages) ? body.messages.length : (Number(body.messageCount) || 0),
+          messages: body.messages || [],
+        };
+
+        if (env.MOHUA_KV) {
+          // Key format: session:<timestamp>:<id> for chronological sorting
+          const kvKey = `session:${sessionRecord.timestamp}:${sessionRecord.id}`;
+          await env.MOHUA_KV.put(kvKey, JSON.stringify(sessionRecord), {
+            // Keep records for 180 days (6 months)
+            expirationTtl: 86400 * 180,
+          });
+        }
+        return json({ ok: true, id: sessionRecord.id });
+      } catch (err: any) {
+        return json({ ok: false, error: err.message }, 500);
+      }
+    }
+
+    // Public API: Get app system settings (such as auto-pause timeout)
+    if (path === "/api/settings" && request.method === "GET") {
+      let autoPauseSeconds = 300; // default 5 minutes
+      if (env.MOHUA_KV) {
+        const val = await env.MOHUA_KV.get("setting:autoPauseSeconds");
+        if (val !== null && val !== undefined) {
+          autoPauseSeconds = Number(val);
+        }
+      }
+      return json({ ok: true, autoPauseSeconds });
     }
 
     // Public in-app test key endpoint

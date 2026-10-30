@@ -1,5 +1,5 @@
 import React from 'react';
-import { Volume2, VolumeX, Sparkles, Smartphone, ShieldCheck, Download, Users, Cloud, Radio } from 'lucide-react';
+import { Volume2, VolumeX, Sparkles, Smartphone, ShieldCheck, Download, Users, Cloud, Radio, BookmarkPlus } from 'lucide-react';
 import type { ModelOption, AsrEngineMode } from '../types';
 
 interface HeaderProps {
@@ -13,6 +13,7 @@ interface HeaderProps {
   onToggleAsrMode: () => void;
   onOpenFaceToFace: () => void;
   onExportSession: () => void;
+  onSaveSession: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -82,7 +83,16 @@ export const Header: React.FC<HeaderProps> = ({
             <Users className="w-3.5 h-3.5" />
           </button>
 
-          {/* 3. Export Session Button */}
+          {/* 3. Save Session with Custom Title & Client Name */}
+          <button
+            onClick={onSaveSession}
+            className="p-1.5 rounded-full border bg-emerald-950/30 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 active:scale-95 transition-all"
+            title="命名并保存会话记录（同步到管理后台）"
+          >
+            <BookmarkPlus className="w-3.5 h-3.5" />
+          </button>
+
+          {/* 4. Export Session Button */}
           <button
             onClick={onExportSession}
             className="p-1.5 rounded-full border bg-gray-900 border-gray-800 text-gray-400 hover:text-emerald-400 active:scale-95 transition-all"

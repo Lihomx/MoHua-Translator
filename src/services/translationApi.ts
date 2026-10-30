@@ -214,3 +214,44 @@ export async function transcribeAudioBlob(blob: Blob): Promise<TranscribeResult>
   const data = await res.json();
   return data;
 }
+
+/**
+ * Save client translation transcript session with title & client tag to Cloudflare backend
+ */
+export async function saveSessionToServer(sessionData: {
+  id: string;
+  title: string;
+  clientName: string;
+  timestamp: number;
+  messageCount: number;
+  messages: any[];
+}): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const res = await fetch('/api/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(sessionData),
+    });
+    const data = await res.json();
+    return data;
+  } catch (err: any) {
+    return { ok: false, error: err.message || '网络连接失败' };
+  }
+}
+
+/**
+ * Fetch application system settings (e.g. idle auto-pause seconds)
+ */
+export async function fetchAppSettings(): Promise<{ autoPauseSeconds: number }> {
+  try {
+    const res = await fetch('/api/settings');
+    if (!res.ok) throw new Error('Settings fetch failed');
+    const data = await res.json();
+    return {
+      autoPauseSeconds: typeof data.autoPauseSeconds === 'number' ? data.autoPauseSeconds : 300,
+    };
+  } catch (err) {
+    return { autoPauseSeconds: 300 }; // 默认 5 分钟 (300秒)
+  }
+}
+

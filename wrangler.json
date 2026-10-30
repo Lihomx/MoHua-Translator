@@ -9,6 +9,12 @@
   "ai": {
     "binding": "AI"
   },
+  "kv_namespaces": [
+    {
+      "binding": "MOHUA_KV",
+      "id": "25efe1d59e0f4f559622e626b2fd46a0"
+    }
+  ],
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
