@@ -216,12 +216,13 @@ export async function transcribeAudioBlob(blob: Blob): Promise<TranscribeResult>
 }
 
 /**
- * Save client translation transcript session with title & client tag to Cloudflare backend
+ * Save / Sync translation project session to Cloudflare backend
  */
 export async function saveSessionToServer(sessionData: {
   id: string;
   title: string;
-  clientName: string;
+  customName?: string;
+  clientName?: string;
   timestamp: number;
   messageCount: number;
   messages: any[];
@@ -236,6 +237,20 @@ export async function saveSessionToServer(sessionData: {
     return data;
   } catch (err: any) {
     return { ok: false, error: err.message || '网络连接失败' };
+  }
+}
+
+/**
+ * Fetch all sessions for client drawer
+ */
+export async function fetchClientSessions(): Promise<any[]> {
+  try {
+    const res = await fetch('/api/sessions');
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.sessions || [];
+  } catch (err) {
+    return [];
   }
 }
 

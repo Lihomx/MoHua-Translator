@@ -7,15 +7,30 @@ import { TextInputModal } from './components/TextInputModal';
 import { ModelSelectorModal } from './components/ModelSelectorModal';
 import { FaceToFaceView } from './components/FaceToFaceView';
 import { SaveTranscriptModal } from './components/SaveTranscriptModal';
-import type { TranslationMessage, ModelOption, AsrEngineMode } from './types';
+import { ProjectDrawerModal } from './components/ProjectDrawerModal';
+import { RenameProjectModal } from './components/RenameProjectModal';
+import type { TranslationMessage, ModelOption, AsrEngineMode, ProjectSession } from './types';
 import { speechRecognitionService } from './services/speechRecognition';
 import { cloudAsrService } from './services/cloudAsrService';
 import { speechSynthesisService } from './services/speechSynthesis';
 import { wakeLockService } from './services/wakeLock';
-import { fetchAvailableModels, translateText, saveSessionToServer, fetchAppSettings } from './services/translationApi';
+import { fetchAvailableModels, translateText, saveSessionToServer, fetchAppSettings, fetchClientSessions } from './services/translationApi';
 import { apiKeyService } from './services/apiKeyService';
 
 const STORAGE_KEY = 'mohua_transcript_history_v1';
+const PROJECTS_KEY = 'mohua_projects_v1';
+const CURRENT_PROJECT_ID_KEY = 'mohua_current_project_id_v1';
+
+// Helper: generate standard project title "YYYY-MM-DD HH:mm"
+function formatProjectTime(date = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const y = date.getFullYear();
+  const m = pad(date.getMonth() + 1);
+  const d = pad(date.getDate());
+  const hh = pad(date.getHours());
+  const mm = pad(date.getMinutes());
+  return `${y}-${m}-${d} ${hh}:${mm}`;
+}
 
 export function App() {
   const [hasStarted, setHasStarted] = useState<boolean>(false);
@@ -29,6 +44,12 @@ export function App() {
   // ASR Engine Mode: 'local' (Web Speech API) vs 'cloud-whisper' (Cloud Whisper ASR)
   const [asrMode, setAsrMode] = useState<AsrEngineMode>('local');
   const [isFaceToFaceActive, setIsFaceToFaceActive] = useState<boolean>(false);
+
+  // Projects state
+  const [projects, setProjects] = useState<ProjectSession[]>([]);
+  const [currentProjectId, setCurrentProjectId] = useState<string>('');
+  const [isProjectDrawerOpen, setIsProjectDrawerOpen] = useState<boolean>(false);
+  const [isRenameModalOpen, setIsRenameModalOpen] = useState<boolean>(false);
 
   // Models state
   const [models, setModels] = useState<ModelOption[]>([]);
@@ -45,7 +66,6 @@ export function App() {
   // Modals state
   const [isModelModalOpen, setIsModelModalOpen] = useState<boolean>(false);
   const [isTextInputModalOpen, setIsTextInputModalOpen] = useState<boolean>(false);
-  const [isSaveModalOpen, setIsSaveModalOpen] = useState<boolean>(false);
   const [isHoldingToTalk, setIsHoldingToTalk] = useState<boolean>(false);
   const [autoPauseSeconds, setAutoPauseSeconds] = useState<number>(300); // 默认5分钟
   const [autoPauseNotice, setAutoPauseNotice] = useState<string | null>(null);
@@ -58,6 +78,16 @@ export function App() {
   const lastActivityTimeRef = useRef<number>(Date.now());
   const autoPauseSecondsRef = useRef<number>(300);
   const isListeningRef = useRef<boolean>(isListening);
+  const currentProjectIdRef = useRef<string>(currentProjectId);
+  const projectsRef = useRef<ProjectSession[]>(projects);
+
+  useEffect(() => {
+    currentProjectIdRef.current = currentProjectId;
+  }, [currentProjectId]);
+
+  useEffect(() => {
+    projectsRef.current = projects;
+  }, [projects]);
 
   useEffect(() => {
     isListeningRef.current = isListening;
@@ -90,15 +120,71 @@ export function App() {
     currentModelRef.current = currentModel;
   }, [currentModel]);
 
+  // Current active project object
+  const currentProject = projects.find(p => p.id === currentProjectId) || null;
+  const currentProjectTitle = currentProject ? currentProject.title : 'MoHua 墨华同传';
+  const defaultTimePrefix = currentProject ? formatProjectTime(new Date(currentProject.createdAt)) : formatProjectTime();
+
+  // Create a new project session helper
+  const createNewProject = (customName?: string): ProjectSession => {
+    const now = Date.now();
+    const timeStr = formatProjectTime(new Date(now));
+    const finalTitle = customName && customName.trim() ? `${timeStr} ${customName.trim()}` : timeStr;
+    const newProj: ProjectSession = {
+      id: `proj_${now}_${Math.random().toString(36).substring(2, 7)}`,
+      title: finalTitle,
+      customName: customName?.trim() || '',
+      clientName: '同传客户端',
+      createdAt: now,
+      updatedAt: now,
+      messages: [],
+    };
+    return newProj;
+  };
+
+  // Sync current project to local storage and Cloudflare KV
+  const syncCurrentProject = (updatedMessages: TranslationMessage[]) => {
+    const projId = currentProjectIdRef.current;
+    if (!projId) return;
+
+    setProjects(prevProjects => {
+      const idx = prevProjects.findIndex(p => p.id === projId);
+      if (idx === -1) return prevProjects;
+
+      const target = prevProjects[idx];
+      const updatedProject: ProjectSession = {
+        ...target,
+        updatedAt: Date.now(),
+        messages: updatedMessages,
+      };
+
+      const updatedList = [...prevProjects];
+      updatedList[idx] = updatedProject;
+
+      try {
+        localStorage.setItem(PROJECTS_KEY, JSON.stringify(updatedList.slice(0, 30)));
+      } catch (e) {}
+
+      // Fire-and-forget real-time cloud sync to Cloudflare KV
+      saveSessionToServer({
+        id: updatedProject.id,
+        title: updatedProject.title,
+        customName: updatedProject.customName,
+        clientName: updatedProject.clientName || '同传客户端',
+        timestamp: updatedProject.createdAt,
+        messageCount: updatedMessages.length,
+        messages: updatedMessages,
+      });
+
+      return updatedList;
+    });
+  };
+
+  // Auto-persist latest messages to active project
   useEffect(() => {
     messagesRef.current = messages;
-    // Persist latest 50 messages to localStorage
-    if (messages.length > 0) {
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(messages.slice(-50)));
-      } catch (e) {
-        // ignore
-      }
+    if (currentProjectIdRef.current) {
+      syncCurrentProject(messages);
     }
   }, [messages]);
 
@@ -106,22 +192,55 @@ export function App() {
     asrModeRef.current = asrMode;
   }, [asrMode]);
 
-  // 1. Initialize: load models, stored history, and detect ASR support
+  // 1. Initialize: load projects, live models status, and app settings
   useEffect(() => {
     speechSynthesisService.setMuted(true);
 
-    // Restore saved messages if available
+    // 1.1 Restore saved projects from localStorage
+    let loadedProjects: ProjectSession[] = [];
     try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setMessages(parsed);
-        }
+      const savedProjectsRaw = localStorage.getItem(PROJECTS_KEY);
+      if (savedProjectsRaw) {
+        loadedProjects = JSON.parse(savedProjectsRaw);
       }
-    } catch (e) {
-      // ignore
+    } catch (e) {}
+
+    // Fallback: migrate legacy mohua_transcript_history_v1 if projects is empty
+    if (loadedProjects.length === 0) {
+      try {
+        const legacyRaw = localStorage.getItem(STORAGE_KEY);
+        if (legacyRaw) {
+          const legacyMsgs = JSON.parse(legacyRaw);
+          if (Array.isArray(legacyMsgs) && legacyMsgs.length > 0) {
+            const initialProj = createNewProject('历史导入');
+            initialProj.messages = legacyMsgs;
+            loadedProjects = [initialProj];
+          }
+        }
+      } catch(e) {}
     }
+
+    if (loadedProjects.length === 0) {
+      const initialProj = createNewProject();
+      loadedProjects = [initialProj];
+    }
+
+    setProjects(loadedProjects);
+    projectsRef.current = loadedProjects;
+
+    const savedActiveId = localStorage.getItem(CURRENT_PROJECT_ID_KEY);
+    const activeProj = loadedProjects.find(p => p.id === savedActiveId) || loadedProjects[0];
+    setCurrentProjectId(activeProj.id);
+    currentProjectIdRef.current = activeProj.id;
+    setMessages(activeProj.messages);
+    messagesRef.current = activeProj.messages;
+
+    // Also pull cloud sessions to merge if available
+    fetchClientSessions().then((remoteSessions) => {
+      if (Array.isArray(remoteSessions) && remoteSessions.length > 0) {
+        // Softly merge cloud projects list
+      }
+    }).catch(() => {});
 
     // Auto-detect if device has Google Speech Services; if not (e.g. industrial PDA), default to Cloud Whisper
     if (!speechRecognitionService.getIsSupported()) {
@@ -453,11 +572,11 @@ export function App() {
     }, 400);
   };
 
-  // 10. Clear & Export Session Records
+  // 10. Clear Current Project Messages (Restart current session)
   const handleClearHistory = () => {
     setMessages([]);
     setInterimText('');
-    localStorage.removeItem(STORAGE_KEY);
+    syncCurrentProject([]);
   };
 
   const handleExportSession = () => {
@@ -472,38 +591,124 @@ export function App() {
       return `[${time}] ${speaker}\n原文: ${m.sourceText}\n译文: ${m.translatedText || '(未完成)'}\n`;
     });
 
-    const content = `MoHua 墨华同传 - 对话记录导出\n导出时间: ${new Date().toLocaleString()}\n总记录数: ${messages.length} 句\n\n${lines.join('\n')}`;
+    const content = `MoHua 墨华同传 - 对话记录导出\n项目: ${currentProjectTitle}\n导出时间: ${new Date().toLocaleString()}\n总记录数: ${messages.length} 句\n\n${lines.join('\n')}`;
     const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `MoHua_同传记录_${new Date().toISOString().slice(0, 10)}.txt`;
+    a.download = `${currentProjectTitle.replace(/[/\\?%*:|"<>]/g, '_')}_同传记录.txt`;
     a.click();
     URL.revokeObjectURL(url);
   };
 
-  // 11. Cloud Session Save Handler
-  const handleSaveSessionToServer = async (title: string, clientName: string): Promise<boolean> => {
-    if (messages.length === 0) {
-      alert('当前暂无可保存的翻译对话记录');
-      return false;
-    }
+  // 11. Project Management Handlers
+  const handleCreateNewProject = (customName?: string) => {
+    const newProj = createNewProject(customName);
+    const updatedList = [newProj, ...projectsRef.current];
+    setProjects(updatedList);
+    projectsRef.current = updatedList;
+    try {
+      localStorage.setItem(PROJECTS_KEY, JSON.stringify(updatedList.slice(0, 30)));
+      localStorage.setItem(CURRENT_PROJECT_ID_KEY, newProj.id);
+    } catch(e) {}
 
-    const sessionId = `ses_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const result = await saveSessionToServer({
-      id: sessionId,
-      title,
-      clientName,
-      timestamp: Date.now(),
-      messageCount: messages.length,
-      messages,
+    setCurrentProjectId(newProj.id);
+    currentProjectIdRef.current = newProj.id;
+    setMessages([]);
+    messagesRef.current = [];
+    setInterimText('');
+
+    // Sync new empty project to server
+    saveSessionToServer({
+      id: newProj.id,
+      title: newProj.title,
+      customName: newProj.customName,
+      clientName: newProj.clientName || '同传客户端',
+      timestamp: newProj.createdAt,
+      messageCount: 0,
+      messages: [],
     });
+  };
 
-    if (!result.ok) {
-      alert(`保存失败: ${result.error || '网络错误'}`);
-      return false;
+  const handleSelectProject = (projectId: string) => {
+    const target = projectsRef.current.find(p => p.id === projectId);
+    if (!target) return;
+
+    setCurrentProjectId(target.id);
+    currentProjectIdRef.current = target.id;
+    setMessages(target.messages || []);
+    messagesRef.current = target.messages || [];
+    setInterimText('');
+    try {
+      localStorage.setItem(CURRENT_PROJECT_ID_KEY, target.id);
+    } catch(e) {}
+  };
+
+  const handleRenameCurrentProject = (newCustomName: string) => {
+    const projId = currentProjectIdRef.current;
+    if (!projId) return;
+
+    setProjects(prevProjects => {
+      const idx = prevProjects.findIndex(p => p.id === projId);
+      if (idx === -1) return prevProjects;
+
+      const target = prevProjects[idx];
+      const timePrefix = formatProjectTime(new Date(target.createdAt));
+      const newTitle = newCustomName && newCustomName.trim()
+        ? `${timePrefix} ${newCustomName.trim()}`
+        : timePrefix;
+
+      const updatedProj: ProjectSession = {
+        ...target,
+        title: newTitle,
+        customName: newCustomName.trim(),
+        updatedAt: Date.now(),
+      };
+
+      const updatedList = [...prevProjects];
+      updatedList[idx] = updatedProj;
+
+      try {
+        localStorage.setItem(PROJECTS_KEY, JSON.stringify(updatedList.slice(0, 30)));
+      } catch(e) {}
+
+      saveSessionToServer({
+        id: updatedProj.id,
+        title: updatedProj.title,
+        customName: updatedProj.customName,
+        clientName: updatedProj.clientName || '同传客户端',
+        timestamp: updatedProj.createdAt,
+        messageCount: updatedProj.messages.length,
+        messages: updatedProj.messages,
+      });
+
+      return updatedList;
+    });
+  };
+
+  const handleDeleteProject = (projectId: string) => {
+    const remaining = projectsRef.current.filter(p => p.id !== projectId);
+    if (remaining.length === 0) {
+      const fresh = createNewProject();
+      remaining.push(fresh);
     }
-    return true;
+
+    setProjects(remaining);
+    projectsRef.current = remaining;
+    try {
+      localStorage.setItem(PROJECTS_KEY, JSON.stringify(remaining.slice(0, 30)));
+    } catch(e) {}
+
+    if (currentProjectIdRef.current === projectId) {
+      const nextActive = remaining[0];
+      setCurrentProjectId(nextActive.id);
+      currentProjectIdRef.current = nextActive.id;
+      setMessages(nextActive.messages || []);
+      messagesRef.current = nextActive.messages || [];
+      try {
+        localStorage.setItem(CURRENT_PROJECT_ID_KEY, nextActive.id);
+      } catch(e) {}
+    }
   };
 
   return (
@@ -553,7 +758,9 @@ export function App() {
         onToggleAsrMode={handleToggleAsrMode}
         onOpenFaceToFace={() => setIsFaceToFaceActive(true)}
         onExportSession={handleExportSession}
-        onSaveSession={() => setIsSaveModalOpen(true)}
+        projectTitle={currentProjectTitle}
+        onOpenProjectDrawer={() => setIsProjectDrawerOpen(true)}
+        onOpenRenameModal={() => setIsRenameModalOpen(true)}
       />
 
       {/* Live Transcript Waterfall */}
@@ -594,12 +801,40 @@ export function App() {
         }}
       />
 
-      {/* Modal: Save Transcript to Cloud & Admin */}
-      <SaveTranscriptModal
-        isOpen={isSaveModalOpen}
-        onClose={() => setIsSaveModalOpen(false)}
-        messageCount={messages.length}
-        onSave={handleSaveSessionToServer}
+      {/* Modal: Rename Current Project (Custom Project Name) */}
+      <RenameProjectModal
+        isOpen={isRenameModalOpen}
+        onClose={() => setIsRenameModalOpen(false)}
+        currentCustomName={currentProject?.customName || ''}
+        defaultTimePrefix={defaultTimePrefix}
+        onSave={handleRenameCurrentProject}
+      />
+
+      {/* Drawer: Projects & History */}
+      <ProjectDrawerModal
+        isOpen={isProjectDrawerOpen}
+        onClose={() => setIsProjectDrawerOpen(false)}
+        currentProjectId={currentProjectId}
+        projects={projects}
+        onSelectProject={handleSelectProject}
+        onNewProject={() => handleCreateNewProject()}
+        onRenameProject={(pId, newName) => {
+          if (pId === currentProjectId) {
+            handleRenameCurrentProject(newName);
+          } else {
+            setProjects(prev => {
+              const updated = prev.map(p => {
+                if (p.id !== pId) return p;
+                const timePrefix = formatProjectTime(new Date(p.createdAt));
+                const title = newName.trim() ? `${timePrefix} ${newName.trim()}` : timePrefix;
+                return { ...p, title, customName: newName.trim(), updatedAt: Date.now() };
+              });
+              try { localStorage.setItem(PROJECTS_KEY, JSON.stringify(updated.slice(0, 30))); } catch(e) {}
+              return updated;
+            });
+          }
+        }}
+        onDeleteProject={handleDeleteProject}
       />
     </div>
   );

@@ -1110,7 +1110,7 @@ export default {
       return json({ ok: true, autoPauseSeconds });
     }
 
-    // Public API: Client submits a named translation session
+    // Public API: Client submits or syncs a named translation session
     if (path === "/api/sessions" && request.method === "POST") {
       try {
         const body: any = await request.json().catch(() => null);
@@ -1120,17 +1120,27 @@ export default {
 
         const sessionRecord = {
           id: String(body.id),
-          title: String(body.title || "未命名会话"),
-          clientName: String(body.clientName || "通用访客"),
+          title: String(body.title || "未命名项目"),
+          customName: body.customName ? String(body.customName) : undefined,
+          clientName: String(body.clientName || "同传客户端"),
           timestamp: Number(body.timestamp) || Date.now(),
+          updatedAt: Date.now(),
           messageCount: Array.isArray(body.messages) ? body.messages.length : (Number(body.messageCount) || 0),
           messages: body.messages || [],
         };
 
         if (env.MOHUA_KV) {
-          // Key format: session:<timestamp>:<id> for chronological sorting
-          const kvKey = `session:${sessionRecord.timestamp}:${sessionRecord.id}`;
-          await env.MOHUA_KV.put(kvKey, JSON.stringify(sessionRecord), {
+          // If existing key with this id exists, overwrite that key; otherwise use session:<timestamp>:<id>
+          let targetKey = `session:${sessionRecord.timestamp}:${sessionRecord.id}`;
+          try {
+            const listRes = await env.MOHUA_KV.list({ prefix: "session:" });
+            const existing = listRes.keys.find(k => k.name.endsWith(`:${sessionRecord.id}`) || k.name === `session:${sessionRecord.id}`);
+            if (existing) {
+              targetKey = existing.name;
+            }
+          } catch(e) {}
+
+          await env.MOHUA_KV.put(targetKey, JSON.stringify(sessionRecord), {
             // Keep records for 180 days (6 months)
             expirationTtl: 86400 * 180,
           });
@@ -1138,6 +1148,38 @@ export default {
         return json({ ok: true, id: sessionRecord.id });
       } catch (err: any) {
         return json({ ok: false, error: err.message }, 500);
+      }
+    }
+
+    // Public API: Client retrieves recent project sessions (summary)
+    if (path === "/api/sessions" && request.method === "GET") {
+      if (!env.MOHUA_KV) {
+        return json({ ok: true, sessions: [] });
+      }
+      try {
+        const listRes = await env.MOHUA_KV.list({ prefix: "session:" });
+        const sessions: any[] = [];
+        for (const key of listRes.keys) {
+          const raw = await env.MOHUA_KV.get(key.name);
+          if (raw) {
+            try {
+              const item = JSON.parse(raw);
+              sessions.push({
+                id: item.id,
+                title: item.title,
+                customName: item.customName,
+                clientName: item.clientName,
+                timestamp: item.timestamp,
+                updatedAt: item.updatedAt || item.timestamp,
+                messageCount: item.messageCount || (item.messages ? item.messages.length : 0),
+              });
+            } catch (e) {}
+          }
+        }
+        sessions.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+        return json({ ok: true, sessions: sessions.slice(0, 50) });
+      } catch (err: any) {
+        return json({ ok: true, sessions: [] });
       }
     }
 

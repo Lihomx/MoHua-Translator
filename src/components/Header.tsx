@@ -1,5 +1,5 @@
 import React from 'react';
-import { Volume2, VolumeX, Sparkles, Smartphone, ShieldCheck, Download, Users, Cloud, Radio, BookmarkPlus } from 'lucide-react';
+import { Volume2, VolumeX, Sparkles, Smartphone, ShieldCheck, Download, Users, Cloud, Radio, FolderKanban, Edit3 } from 'lucide-react';
 import type { ModelOption, AsrEngineMode } from '../types';
 
 interface HeaderProps {
@@ -13,7 +13,9 @@ interface HeaderProps {
   onToggleAsrMode: () => void;
   onOpenFaceToFace: () => void;
   onExportSession: () => void;
-  onSaveSession: () => void;
+  projectTitle: string;
+  onOpenProjectDrawer: () => void;
+  onOpenRenameModal: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -27,21 +29,36 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleAsrMode,
   onOpenFaceToFace,
   onExportSession,
-  onSaveSession,
+  projectTitle,
+  onOpenProjectDrawer,
+  onOpenRenameModal,
 }) => {
   return (
     <header className="sticky top-0 z-40 bg-[#0b0f19]/90 backdrop-blur-md border-b border-gray-800/80 px-3.5 py-2.5 pt-safe">
       <div className="flex items-center justify-between max-w-lg mx-auto">
-        {/* Brand & Mode info */}
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center shadow-lg shadow-emerald-500/20 text-white font-bold text-sm shrink-0">
+        {/* Brand & Project info */}
+        <div className="flex items-center gap-2 min-w-0">
+          <button
+            onClick={onOpenProjectDrawer}
+            className="w-8 h-8 rounded-full bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center shadow-lg shadow-emerald-500/20 text-white font-bold text-sm shrink-0 hover:opacity-90 active:scale-95 transition-all"
+            title="点击展开历史翻译项目"
+          >
             墨
-          </div>
-          <div>
-            <div className="flex items-center gap-1.5">
-              <span className="font-bold text-sm tracking-tight text-white">MoHua 墨华</span>
-              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-emerald-500/10 text-emerald-400 font-medium border border-emerald-500/20">
-                es-MX ➔ zh
+          </button>
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <button
+                onClick={onOpenRenameModal}
+                className="flex items-center gap-1 text-left group hover:text-emerald-300 transition-colors max-w-[130px] xs:max-w-[170px]"
+                title="点击重命名当前翻译项目"
+              >
+                <span className="font-bold text-xs sm:text-sm tracking-tight text-white truncate group-hover:text-emerald-300">
+                  {projectTitle}
+                </span>
+                <Edit3 className="w-2.5 h-2.5 text-gray-400 group-hover:text-emerald-400 shrink-0 opacity-70" />
+              </button>
+              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-emerald-500/10 text-emerald-400 font-medium border border-emerald-500/20 shrink-0">
+                es-MX➔zh
               </span>
             </div>
             <div className="flex items-center gap-2 text-[10px] text-gray-400">
@@ -84,13 +101,13 @@ export const Header: React.FC<HeaderProps> = ({
             <Users className="w-3.5 h-3.5" />
           </button>
 
-          {/* 3. Save Session with Custom Title & Client Name */}
+          {/* 3. Open Project / History Drawer Button */}
           <button
-            onClick={onSaveSession}
+            onClick={onOpenProjectDrawer}
             className="p-1.5 rounded-full border bg-emerald-950/30 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 active:scale-95 transition-all"
-            title="命名并保存会话记录（同步到管理后台）"
+            title="历史翻译项目与新建项目"
           >
-            <BookmarkPlus className="w-3.5 h-3.5" />
+            <FolderKanban className="w-3.5 h-3.5" />
           </button>
 
           {/* 4. Export Session Button */}
