@@ -27,6 +27,7 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleAsrMode,
   onOpenFaceToFace,
   onExportSession,
+  onSaveSession,
 }) => {
   return (
     <header className="sticky top-0 z-40 bg-[#0b0f19]/90 backdrop-blur-md border-b border-gray-800/80 px-3.5 py-2.5 pt-safe">
